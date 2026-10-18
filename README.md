@@ -65,10 +65,10 @@ The Vendor Agent's approver list must match the expert directory (A12). Generate
 
 ```
 $ python -m experts.print_allowlist
-APPROVER_ALLOWLIST=U_RND_1,U_RND_2,U_QARA_1,U_QARA_2,U_ENG_1,U_ENG_2,U_SALES_1,U_SALES_2
+APPROVER_ALLOWLIST=U0C9YESNKB7,U0C9YET9PM3,U0CA5L9TELR
 ```
 
-These are placeholder IDs. For a live Slack demo, swap in real member IDs ([`router/SLACK_SETUP.md`](router/SLACK_SETUP.md), step 4).
+These are the real member IDs of the three experts in our test workspace: Saanvi (R&D), Neha (QA/RA, pricing and contracts) and Manasvini (Engineering, orders and shipping). See [`router/SLACK_SETUP.md`](router/SLACK_SETUP.md), step 4.
 
 ## Run locally
 
@@ -104,7 +104,7 @@ If any check fails, **stop and tell the team.** A failure reopens decision D6 (h
 
 | Check | Result | Date | Notes |
 |---|---|---|---|
-| (a) Agentverse hosted package list and storage allow what the Vendor Agent and Guard need (an HTTP client, `json`, no local embedding library) | **partial pass** | 2026-10-17 | The hosted echo agent ran with `uagents`, `uagents_core`'s Chat Protocol and `ctx.storage`, and no errors. Not yet tried on hosted: an HTTP client, the LLM SDKs, several modules or folders. Person 2's desk check: [`guard/NOTES.md`](guard/NOTES.md) "Unverified"; their flat hosted Guard build is in `guard/hosted/`. |
+| (a) Agentverse hosted package list and storage allow what the Vendor Agent and Guard need (an HTTP client, `json`, no local embedding library) | **Guard: pass. Vendor Agent: pending** | 2026-10-17 | Guard (Person 2): runs hosted with the standard library only; outbound HTTPS to Gemini works; the live smoke check passed (patient data blocked, draft approved by the Gemini judge, pricing blocked). Details in [`guard/NOTES.md`](guard/NOTES.md). The hosted echo agent also ran with `uagents`, the Chat Protocol and `ctx.storage`. Still to check: the Vendor Agent's own packages, once it's hosted (Person 1). |
 | (b) A `ChatMessage` round trip between the local Router and a hosted agent | **pass** | 2026-10-17 | The local Router (mailbox agent) and the hosted echo agent ([`scripts/verify/echo_agent_hosted.py`](scripts/verify/echo_agent_hosted.py)). `/ask hello` in Slack, then the A2 envelope to the hosted agent, then the A2 reply back, then "Echo from hosted agent: hello" in the Slack thread, well within 30 s. |
 | (c) A hosted KB write survives an agent restart | **pass (storage)** | 2026-10-17 | The echo agent keeps a message counter in `ctx.storage`. After Stop then Start on Agentverse, the next message was #3, so the count continued. Re-check with the real Vendor KB once Person 1's agent is hosted. |
 

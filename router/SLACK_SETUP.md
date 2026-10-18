@@ -34,16 +34,16 @@ To set it up by hand instead: turn on Socket Mode; under Interactivity & Shortcu
 - **Member ID:** open the person's profile, click **⋮**, then **Copy member ID** (it starts with `U`). For testing, the reviewer can be you.
 
 ## 4. Point the expert directory at real people
-`experts/directory.yaml` (Person 2's file) uses placeholder IDs such as `U_RND_1`. The bot DMs whatever ID the matcher returns, so for a live demo the experts need real member IDs from your workspace.
-- **With placeholder IDs,** the DM fails and the question falls back to #liaison-experts. Replies there are still only accepted from IDs in the directory.
-- **To fix it,** ask Person 2 to swap in your workspace's member IDs, or keep a local, uncommitted copy.
+`experts/directory.yaml` (Person 2's file) lists the experts by their real member IDs in the test workspace: Saanvi (R&D), Neha (QA/RA, pricing and contracts) and Manasvini (Engineering, orders and shipping). The bot DMs whatever ID the matcher returns.
+- **In a different workspace,** ask Person 2 to put your workspace's member IDs in the directory.
+- **If an ID isn't in the workspace,** the DM fails and the question falls back to the experts channel. Replies there are still only accepted from IDs in the directory.
 
-Then regenerate the Vendor Agent's approver list:
+The Vendor Agent's approver list comes from the same directory:
 
 ```
 python -m experts.print_allowlist
-# with the committed placeholder directory this prints:
-# APPROVER_ALLOWLIST=U_RND_1,U_RND_2,U_QARA_1,U_QARA_2,U_ENG_1,U_ENG_2,U_SALES_1,U_SALES_2
+# prints:
+# APPROVER_ALLOWLIST=U0C9YESNKB7,U0C9YET9PM3,U0CA5L9TELR
 ```
 Paste that line into the Vendor Agent's env (A12). It must match the directory exactly.
 

@@ -51,6 +51,6 @@ The split posts escalations "in the topic's channel". We changed that to **one a
 ## Unverified / waiting on others
 - **PR0 (Person 1):** until `ApprovedAnswer.guard_verdict` is Optional, building the `ApprovedAnswer` fails. The bot still posts the answer to the asker and logs the failure. Three tests are skipped with that reason. They passed when PR0 was applied locally.
 - **The Vendor Agent's envelope (Person 1):** built to A2. Not yet tested against the real `vendor_agent/agent.py`.
-- **`experts/directory.yaml` placeholder Slack IDs:** must be swapped for real member IDs before a live demo, or every escalation falls back to `EXPERTS_CHANNEL` (see `SLACK_SETUP.md` step 4).
+- **`experts/directory.yaml`** now holds the 3 real member IDs (`APPROVER_ALLOWLIST=U0C9YESNKB7,U0C9YET9PM3,U0CA5L9TELR`). An ID not in the workspace makes the DM fail, and the escalation falls back to `EXPERTS_CHANNEL`.
 - **Hosted checks (T9):** see the Verification table in the root README.
 - uAgents 0.26.1 runs the `startup` handler (which starts Slack) only after its Agentverse status call. Person 2 measured that at about 33 s, so the bot can take up to about 30 s to come online after `python -m router.agent`.

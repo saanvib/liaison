@@ -1,7 +1,6 @@
 """The whole learning loop in process (D12): real VendorCore and GuardCore, faked LLMs and Slack.
 
-Each test is one scenario from person-2-guard-experts-tests.md, Step 6. They skip until
-Person 1's vendor_agent merges (see the `loop` fixture).
+Each test is one scenario from person-2-guard-experts-tests.md, Step 6.
 """
 import time
 

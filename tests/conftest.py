@@ -19,6 +19,10 @@ from experts import load_directory
 from experts.embed import BagOfWordsEmbedder
 from guard.core import GuardCore, Mode, detect_mode
 from guard.judge import Judge
+from vendor_agent.config import Config
+from vendor_agent.core import VendorCore
+from vendor_agent.kb import KnowledgeBase
+from vendor_agent.retrieval import DictStorage, Retriever
 
 ROUTER_ADDRESS = "agent1q-router"
 GUARD_ADDRESS = "agent1q-guard"
@@ -135,11 +139,6 @@ class Loop:
 
 @pytest.fixture
 def loop() -> Loop:
-    core_mod = pytest.importorskip("vendor_agent.core", reason="needs Person 1's vendor_agent (not merged yet)")
-    from vendor_agent.config import Config
-    from vendor_agent.kb import KnowledgeBase
-    from vendor_agent.retrieval import DictStorage, Retriever
-
     storage = DictStorage()
     embedder = BagOfWordsEmbedder()
     config = Config(
@@ -155,5 +154,5 @@ def loop() -> Loop:
     retriever = Retriever(embedder, storage)
     for doc in DOCS:
         retriever.add_document(doc)
-    vendor = core_mod.VendorCore(kb, retriever, llm, guard, router, storage, config, clock=lambda: TODAY)
+    vendor = VendorCore(kb, retriever, llm, guard, router, storage, config, clock=lambda: TODAY)
     return Loop(vendor, guard, router, llm, storage, judge_llm)

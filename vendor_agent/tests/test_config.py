@@ -1,10 +1,31 @@
 from contracts import Topic
 from vendor_agent import clients, models, texts
+from vendor_agent.clients import default_embedder
 from vendor_agent.config import Config
 
 
 def test_everything_imports():
     assert clients.LLMClient and clients.OfflineEmbedder and models.VendorOutput and texts.RETRY_TEXT
+
+
+def _config(**overrides):
+    base = dict(router_address="r", guard_address="g", ingest_address="i", approver_allowlist=frozenset())
+    return Config(**{**base, **overrides})
+
+
+def test_default_embedder_picks_offline_with_no_keys_or_url():
+    assert isinstance(default_embedder(_config()), clients.OfflineEmbedder)
+
+
+def test_default_embedder_picks_http_when_embeddings_url_set():
+    embedder = default_embedder(_config(embeddings_url="https://example.test/embed"))
+    assert isinstance(embedder, clients.HttpEmbedder)
+
+
+def test_default_embedder_picks_gemini_when_llm_key_set_and_no_url():
+    embedder = default_embedder(_config(llm_api_key="sk-test"))
+    assert isinstance(embedder, clients.GeminiEmbedder)
+    assert embedder.api_key == "sk-test"
 
 
 def test_config_from_env_dict_required_only():

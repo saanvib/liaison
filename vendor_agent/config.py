@@ -36,6 +36,7 @@ class Config:
     embeddings_api_key: Optional[str] = None
     embeddings_model: Optional[str] = None
     team_roles: Mapping[Topic, str] = field(default_factory=lambda: dict(DEFAULT_TEAM_ROLES))
+    vendor_seed: Optional[str] = None
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "Config":
@@ -61,4 +62,5 @@ class Config:
             embeddings_api_key=env.get("EMBEDDINGS_API_KEY") or None,
             embeddings_model=env.get("EMBEDDINGS_MODEL") or None,
             team_roles=team_roles,
+            vendor_seed=env.get("VENDOR_SEED") or None,
         )

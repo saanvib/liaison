@@ -1,10 +1,10 @@
 """Local smoke run: the Vendor Agent answers hand-sent ChatMessages against the
-seeded docs, with a fake Guard/LLM/Router (no network, no API cost).
+seeded docs, with a fake Guard agent, LLM and Router (no network, no API cost).
 
     python -m vendor_agent.smoke
 
-Runs the Vendor Agent and a test client in a uAgents Bureau, so messages are
-delivered in-process. Exits 0 when a documented (KB) question gets a cited
+Runs the Vendor Agent, a fake Guard agent and a test client in a uAgents Bureau,
+so messages, GuardRequests and GuardVerdicts included, are delivered in-process. Exits 0 when a documented (KB) question gets a cited
 answer, an unrelated question gets the holding reply, and a patient-data
 question is refused; 1 otherwise. Uses a fixed dev seed; never use it for a
 real agent.
@@ -26,7 +26,9 @@ from pathlib import Path
 from uagents import Agent, Bureau, Context
 from uagents_core.contrib.protocols.chat import ChatAcknowledgement, ChatMessage, TextContent
 
-from contracts import ApprovedAnswer, Escalation, EscalationReason, GuardCategory, GuardVerdict, Topic, Verdict
+from contracts import (
+    ApprovedAnswer, Escalation, EscalationReason, GuardCategory, GuardRequest, GuardVerdict, Topic, Verdict,
+)
 
 from vendor_agent.agent import create_agent
 from vendor_agent.clients import OfflineEmbedder
@@ -45,28 +47,12 @@ BLOCKED = GuardVerdict(request_id="r", verdict=Verdict.BLOCKED, reason="patient 
 
 TIMEOUT_S = 90.0
 
-# label, question, the Guard verdicts handle_question will consume for it, in order
+# label, question, the verdicts the fake Guard agent sends back for it, in order
 CASES = [
     ("documented", DOCUMENTED_QUESTION, [APPROVED, APPROVED]),  # screen, then egress (KB hit, external)
     ("unrelated", "What is your favorite kayaking route?", [APPROVED]),  # screen only; low confidence, no draft
     ("patient-data", "My patient Jane Doe, DOB 1/1/1990, needs her AuroraPrep result interpreted.", [BLOCKED]),
 ]
-
-
-class FakeGuard:
-    def __init__(self, verdicts):
-        self.verdicts = list(verdicts)
-
-    async def check(self, req, timeout_s=10.0):
-        return self.verdicts.pop(0)
-
-
-class FakeRouter:
-    async def send_escalation(self, esc):
-        pass
-
-    async def reply_chat(self, to_sender, text):
-        pass
 
 
 class FakeLLM:
@@ -77,11 +63,11 @@ class FakeLLM:
         return Topic.RND
 
 
-def make_fake_core() -> VendorCore:
+def make_fake_core(guard_address: str) -> VendorCore:
     storage = DictStorage()
     embedder = OfflineEmbedder()
     config = Config(
-        router_address="n/a", guard_address="n/a", ingest_address="n/a", approver_allowlist=frozenset(),
+        router_address="n/a", guard_address=guard_address, ingest_address="n/a", approver_allowlist=frozenset(),
         vendor_seed="liaison-dev-only vendor smoke vendor",
     )
     kb = KnowledgeBase(storage, embedder, config)
@@ -103,15 +89,22 @@ def make_fake_core() -> VendorCore:
         sender=config.router_address,
     )
 
-    guard = FakeGuard([v for _, _, verdicts in CASES for v in verdicts])
-    return VendorCore(kb, retriever, FakeLLM(), guard, FakeRouter(), storage, config, clock=lambda: None)
+    return VendorCore(kb, retriever, FakeLLM(), None, None, storage, config, clock=lambda: None)
 
 
 async def main() -> int:
     quiet = dict(report_events=False, mark_inactive_on_shutdown=False)
     client = Agent(name="vendor-smoke-client", seed="liaison-dev-only vendor smoke client", **quiet)
-    core = make_fake_core()
+    guard = Agent(name="vendor-smoke-guard", seed="liaison-dev-only vendor smoke guard", **quiet)
+    core = make_fake_core(guard.address)
     vendor, _ = create_agent(config=core.config, core=core, **quiet)
+
+    verdicts = [v for _, _, case_verdicts in CASES for v in case_verdicts]
+
+    @guard.on_message(model=GuardRequest)
+    async def on_guard_request(ctx: Context, sender: str, req: GuardRequest):
+        verdict = verdicts.pop(0)
+        await ctx.send(sender, GuardVerdict(**{**verdict.dict(), "request_id": req.request_id}))
 
     replies: list[str] = []
     acked = asyncio.Event()
@@ -136,7 +129,7 @@ async def main() -> int:
             while len(replies) <= i:
                 await asyncio.sleep(0.1)
 
-    bureau = Bureau(agents=[vendor, client], port=8200, endpoint=[])
+    bureau = Bureau(agents=[vendor, guard, client], port=8200, endpoint=[])
     task = asyncio.create_task(bureau.run_async())
 
     async def wait_for_all():

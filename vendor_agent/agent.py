@@ -1,18 +1,26 @@
 """agent.py: uAgents wiring for the Vendor Agent. No business logic here --
-VendorCore.handle_question / handle_approved_answer / handle_ingest do all of
+VendorCore.start / advance / handle_approved_answer / handle_ingest do all of
 that; this file only moves messages in and out (D4, D7; A2, A8, A10).
 
     python -m vendor_agent.agent          # needs the env in vendor_agent/.env.example
+
+Each Guard call is its own round of messages: on_chat sends the screen
+GuardRequest and returns, on_verdict picks the question back up from storage,
+and expire_guard_checks treats a check with no verdict by its deadline as a
+timeout. Nothing waits in memory: hosted Agentverse keeps no in-memory state
+between messages (an awaited Future or a background task never saw its verdict,
+2026-10-18), and uAgents runs one handler at a time, so awaiting a verdict inside
+a handler would block the very message that carries it.
 
 Verified on uagents 0.26.1: ChatMessage has timestamp, msg_id, content;
 ChatAcknowledgement has timestamp, acknowledged_msg_id, metadata.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Optional
+from typing import Callable, Optional
 
 from uagents import Agent, Context, Protocol
 from uagents.crypto import Identity
@@ -24,12 +32,13 @@ from uagents_core.contrib.protocols.chat import (
     chat_protocol_spec,
 )
 
-from contracts import ApprovedAnswer, Escalation, GuardRequest, GuardVerdict, IngestDocument
+from contracts import ApprovedAnswer, GuardVerdict, IngestDocument
 
 from vendor_agent.clients import LLMClient, default_embedder
 from vendor_agent.config import Config
-from vendor_agent.core import VendorCore
+from vendor_agent.core import PendingCheck, VendorCore
 from vendor_agent.kb import KnowledgeBase
+from vendor_agent.models import VendorOutput
 from vendor_agent.retrieval import Retriever
 
 log = logging.getLogger(__name__)
@@ -37,8 +46,9 @@ log = logging.getLogger(__name__)
 REF_PREFIX = "LIAISON-REF: "
 OUTCOME_PREFIX = "OUTCOME: "
 
-SendModel = Callable[[str, object], Awaitable[None]]
-SendText = Callable[[str, str], Awaitable[None]]
+SWEEP_PERIOD_S = 2.0  # how often expire_guard_checks looks for checks past their deadline
+_PENDING_PREFIX = "vendor_agent:guard_pending:"
+_PENDING_IDS_KEY = "vendor_agent:guard_pending_ids"
 
 
 def build_reply_envelope(asker_ref: str, outcome: str, body: str) -> str:
@@ -58,53 +68,35 @@ def parse_question_envelope(text: str) -> tuple[str, str]:
     return asker_ref, body
 
 
-class UAgentGuardClient:
-    """GuardClient: sends a GuardRequest to guard_address, awaits a Future keyed
-    by request_id, returns None on timeout. Transport is injected (send_model),
-    same pattern as router/vendor_client.py's VendorClient, so this needs no
-    live uAgents Context to construct."""
+class PendingChecks:
+    """PendingChecks waiting on a Guard verdict, in agent storage, keyed by request_id,
+    each with a deadline. Storage has no key listing, so the ids are kept in a list too."""
 
-    def __init__(self, guard_address: str, send_model: SendModel):
-        self.guard_address = guard_address
-        self._send_model = send_model
-        self._pending: dict[str, asyncio.Future] = {}
+    def __init__(self, storage, now: Callable[[], float] = time.time):
+        self.storage = storage
+        self.now = now
 
-    async def check(self, req: GuardRequest, timeout_s: float = 10.0) -> Optional[GuardVerdict]:
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-        self._pending[req.request_id] = future
-        try:
-            await self._send_model(self.guard_address, req)
-            return await asyncio.wait_for(future, timeout_s)
-        except asyncio.TimeoutError:
-            return None
-        except Exception:
-            log.exception("guard check failed for request_id=%s", req.request_id)
-            return None
-        finally:
-            self._pending.pop(req.request_id, None)
+    def add(self, check: PendingCheck, timeout_s: float) -> None:
+        request_id = check.request.request_id
+        self.storage.set(_PENDING_PREFIX + request_id, {"check": check.to_dict(), "deadline": self.now() + timeout_s})
+        self.storage.set(_PENDING_IDS_KEY, (self.storage.get(_PENDING_IDS_KEY) or []) + [request_id])
 
-    def on_verdict(self, verdict: GuardVerdict) -> None:
-        future = self._pending.get(verdict.request_id)
-        if future is not None and not future.done():
-            future.set_result(verdict)
+    def pop(self, request_id: str) -> Optional[PendingCheck]:
+        record = self.storage.get(_PENDING_PREFIX + request_id)
+        self.storage.set(_PENDING_PREFIX + request_id, None)
+        self.storage.set(_PENDING_IDS_KEY, [i for i in self.storage.get(_PENDING_IDS_KEY) or [] if i != request_id])
+        return PendingCheck.from_dict(record["check"]) if record else None
 
-
-class UAgentRouterClient:
-    """RouterClient: sends Escalations to router_address, and chat replies to
-    whoever asked (the Router for internal askers, the asker's own address
-    for external ones)."""
-
-    def __init__(self, router_address: str, send_model: SendModel, send_text: SendText):
-        self.router_address = router_address
-        self._send_model = send_model
-        self._send_text = send_text
-
-    async def send_escalation(self, esc: Escalation) -> None:
-        await self._send_model(self.router_address, esc)
-
-    async def reply_chat(self, to_sender: str, text: str) -> None:
-        await self._send_text(to_sender, text)
+    def pop_expired(self) -> list[PendingCheck]:
+        now = self.now()
+        expired = []
+        for request_id in self.storage.get(_PENDING_IDS_KEY) or []:
+            record = self.storage.get(_PENDING_PREFIX + request_id)
+            if record is None or record["deadline"] <= now:
+                check = self.pop(request_id)
+                if check is not None:
+                    expired.append(check)
+        return expired
 
 
 def _vendor_storage(seed: str) -> KeyValueStore:
@@ -117,7 +109,8 @@ def _vendor_storage(seed: str) -> KeyValueStore:
 
 def build_core(storage=None, guard=None, router=None, config: Optional[Config] = None) -> VendorCore:
     """Build a real VendorCore from env. guard/router default to None, which is
-    fine for callers (ingest.py --direct) that only use handle_ingest."""
+    fine for the agent wiring (it sends Guard and Router messages itself) and for
+    ingest.py --direct (it only uses handle_ingest)."""
     config = config or Config.from_env()
     storage = storage if storage is not None else _vendor_storage(config.vendor_seed)
     embedder = default_embedder(config)
@@ -129,7 +122,10 @@ def build_core(storage=None, guard=None, router=None, config: Optional[Config] =
     )
 
 
-def wire(agent: Agent, config: Config, core: Optional[VendorCore] = None, storage=None) -> VendorCore:
+def wire(
+    agent: Agent, config: Config, core: Optional[VendorCore] = None, storage=None,
+    now: Callable[[], float] = time.time,
+) -> VendorCore:
     """Attach every handler to `agent` (local or hosted-predefined) and return the
     VendorCore it ends up using. Split out from create_agent() so the hosted
     entry point (vendor_agent/hosted/entry.py) can call this on Agentverse's
@@ -137,67 +133,52 @@ def wire(agent: Agent, config: Config, core: Optional[VendorCore] = None, storag
 
     `storage` lets the hosted entry point pass `agent.storage` directly (no
     VENDOR_SEED hosted -- Agentverse assigns the address, so there's nothing to
-    derive a KeyValueStore name from); local use derives one from VENDOR_SEED."""
-    runtime: dict = {"ctx": None}
-
-    async def send_text(address: str, text: str) -> None:
-        await runtime["ctx"].send(address, ChatMessage(content=[TextContent(text=text)]))
-
-    async def send_model(address: str, model) -> None:
-        await runtime["ctx"].send(address, model)
-
-    guard_client = UAgentGuardClient(config.guard_address, send_model)
-    router_client = UAgentRouterClient(config.router_address, send_model, send_text)
-
+    derive a KeyValueStore name from); local use derives one from VENDOR_SEED.
+    Pending Guard checks live in the core's storage, next to the KB."""
     if core is None:
         core = build_core(
-            storage=storage if storage is not None else _vendor_storage(config.vendor_seed),
-            guard=guard_client, router=router_client, config=config,
+            storage=storage if storage is not None else _vendor_storage(config.vendor_seed), config=config,
         )
+    pending = PendingChecks(core.storage, now=now)
+
+    async def ask_guard(ctx: Context, check: PendingCheck) -> None:
+        # Saved before sending: the verdict may be handled before this handler returns.
+        pending.add(check, config.guard_timeout_s)
+        await ctx.send(config.guard_address, check.request)
+
+    async def deliver(ctx: Context, check: PendingCheck, output: VendorOutput) -> None:
+        if check.sender == config.router_address:
+            reply_text = build_reply_envelope(check.asker_ref, output.outcome, output.reply_text or "")
+        else:
+            reply_text = output.reply_text or ""
+        await ctx.send(check.sender, ChatMessage(content=[TextContent(text=reply_text)]))
+        if output.escalation is not None:
+            await ctx.send(config.router_address, output.escalation)
+
+    async def resume(ctx: Context, check: PendingCheck, verdict: Optional[GuardVerdict]) -> None:
+        step = core.advance(check, verdict)
+        if isinstance(step, PendingCheck):
+            await ask_guard(ctx, step)
+        else:
+            await deliver(ctx, check, step)
 
     chat_proto = Protocol(spec=chat_protocol_spec)
-    answering: set[asyncio.Task] = set()  # keeps background answers referenced until they finish
-
-    def _answer_done(task: asyncio.Task) -> None:
-        answering.discard(task)
-        if not task.cancelled() and task.exception():
-            log.error("answering a chat message failed", exc_info=task.exception())
 
     @chat_proto.on_message(ChatMessage)
     async def on_chat(ctx: Context, sender: str, msg: ChatMessage):
-        runtime["ctx"] = ctx  # a message handler always has a valid ctx; don't rely on startup winning a race
         await ctx.send(sender, ChatAcknowledgement(
             timestamp=datetime.now(timezone.utc), acknowledged_msg_id=msg.msg_id
         ))
-        # uAgents runs one message handler at a time by default. handle_question waits for a
-        # GuardVerdict that arrives as a separate message, so awaiting it here would keep
-        # on_verdict from running until the Guard wait had already timed out (every question
-        # became "retry"). Answer in a background task so this handler returns at once.
-        task = asyncio.create_task(_answer(ctx, sender, msg.text()))
-        answering.add(task)
-        task.add_done_callback(_answer_done)
-
-    async def _answer(ctx: Context, sender: str, text: str) -> None:
-        internal = sender == config.router_address
-
-        if internal:
+        text = msg.text()
+        if sender == config.router_address:
             try:
                 asker_ref, question = parse_question_envelope(text)
             except ValueError:
-                ctx.logger.warning("dropped malformed question envelope from %s", sender)
+                ctx.logger.warning(f"dropped malformed question envelope from {sender}")
                 return
         else:
             asker_ref, question = f"chat:{sender}", text
-
-        output = await core.handle_question(question, sender, asker_ref)
-
-        if internal:
-            reply_text = build_reply_envelope(asker_ref, output.outcome, output.reply_text or "")
-        else:
-            reply_text = output.reply_text or ""
-        await router_client.reply_chat(sender, reply_text)
-        if output.escalation is not None:
-            await router_client.send_escalation(output.escalation)
+        await ask_guard(ctx, core.start(question, sender, asker_ref))
 
     @chat_proto.on_message(ChatAcknowledgement)
     async def on_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
@@ -216,11 +197,20 @@ def wire(agent: Agent, config: Config, core: Optional[VendorCore] = None, storag
 
     @agent.on_message(model=GuardVerdict)
     async def on_verdict(ctx: Context, sender: str, msg: GuardVerdict):
-        guard_client.on_verdict(msg)
+        if sender != config.guard_address:
+            ctx.logger.warning(f"dropped GuardVerdict from {sender}, not the Guard")
+            return
+        check = pending.pop(msg.request_id)
+        if check is None:
+            ctx.logger.info(f"late GuardVerdict for {msg.request_id}: its check already timed out")
+            return
+        await resume(ctx, check, msg)
 
-    @agent.on_event("startup")
-    async def on_startup(ctx: Context):
-        runtime["ctx"] = ctx
+    @agent.on_interval(period=SWEEP_PERIOD_S)
+    async def expire_guard_checks(ctx: Context):
+        for check in pending.pop_expired():
+            ctx.logger.info(f"no GuardVerdict for {check.request.request_id} ({check.stage}) in time")
+            await resume(ctx, check, None)
 
     return core
 

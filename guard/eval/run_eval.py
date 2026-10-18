@@ -26,7 +26,7 @@ from contracts import Citation, GuardCategory, GuardRequest, Source, Verdict
 
 from guard.core import GuardCore
 from guard.grounding import Grounding
-from guard.judge import Judge, JudgeResult
+from guard.judge import JUDGE_UNAVAILABLE, Judge, JudgeResult
 from guard.rules import load_policy
 
 LABELED_SET = Path(__file__).with_name("labeled_set.jsonl")
@@ -91,6 +91,7 @@ class Report:
     stats: dict = field(default_factory=lambda: {c: CategoryStats() for c in REPORTED_CATEGORIES})
     flagged: int = 0
     flagged_expected: int = 0
+    judge_unavailable: int = 0  # rows whose verdict came from a failed judge call
     mismatches: list = field(default_factory=list)  # (id, expected, got)
 
     @property
@@ -122,6 +123,7 @@ def evaluate(core: GuardCore, rows: list[dict]) -> Report:
         exp_category = GuardCategory(row["expected_category"])
         got = core.check(to_request(row))
         got_flag = _flagged(got.verdict)
+        report.judge_unavailable += got.reason == JUDGE_UNAVAILABLE
 
         if exp_category in report.stats:
             report.stats[exp_category].expected += 1
@@ -187,8 +189,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("--llm real needs LLM_API_KEY in the environment.", file=sys.stderr)
         return 2
     policy = load_policy(args.policy) if args.policy else load_policy()
-    report = evaluate(build_core(args.llm, policy), load_rows(args.labeled_set))
+    core = build_core(args.llm, policy)
+    report = evaluate(core, load_rows(args.labeled_set))
     print(format_report(report, args.llm))
+    if args.llm == "real" and report.judge_unavailable:
+        why = getattr(core.judge, "last_error", None) or "unknown"
+        print(
+            f"\nFAIL: the real judge was unavailable on {report.judge_unavailable} row(s), so it was not "
+            f"actually tested (last error: {why})."
+        )
+        return 1
     return 0 if report.passed else 1
 
 

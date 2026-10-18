@@ -32,14 +32,15 @@ def parse_allowed_senders(value: Optional[str]) -> frozenset[str]:
     return frozenset(a.strip() for a in (value or "").split(",") if a.strip())
 
 
-def build_core() -> GuardCore:
+def build_core(policy: Optional[dict] = None) -> GuardCore:
+    """`policy=None` reads guard/policy.json; the hosted build passes the embedded copy (no file reads there)."""
     if not os.environ.get("LLM_API_KEY"):
         log.warning("LLM_API_KEY not set: judge unavailable, drafts that pass the rules will be needs_review")
-        return GuardCore(judge=None, grounding=Grounding())
+        return GuardCore(judge=None, grounding=Grounding(), policy=policy)
     from guard.llm import AnthropicLLM
 
     llm = AnthropicLLM()
-    return GuardCore(judge=Judge(llm), grounding=Grounding(llm))
+    return GuardCore(judge=Judge(llm), grounding=Grounding(llm), policy=policy)
 
 
 async def handle_request(

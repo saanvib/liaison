@@ -9,6 +9,7 @@ needs_review with reason "judge unavailable", never approved.
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from dataclasses import dataclass
 from typing import Optional
@@ -16,6 +17,8 @@ from typing import Optional
 from contracts import GuardCategory, GuardRequest, Verdict
 
 from guard.llm import LLMClient
+
+log = logging.getLogger(__name__)
 
 JUDGE_UNAVAILABLE = "judge unavailable"
 
@@ -104,10 +107,20 @@ def parse_result(text: str) -> Optional[JudgeResult]:
 class Judge:
     def __init__(self, llm: LLMClient):
         self.llm = llm
+        self.last_error: Optional[str] = None  # why the most recent call was unavailable, for diagnostics
 
     def assess(self, req: GuardRequest) -> JudgeResult:
         try:
             text = self.llm.complete(SYSTEM_PROMPT, build_prompt(req), RESULT_SCHEMA)
-        except Exception:  # LLMError, timeouts, anything a client raises: fail closed
-            return _unavailable()
-        return parse_result(text) or _unavailable()
+        except Exception as e:  # LLMError, timeouts, anything a client raises: fail closed
+            return self._fail(req, f"{type(e).__name__}: {e}")
+        result = parse_result(text)
+        if result is None:
+            return self._fail(req, "malformed judge reply")
+        self.last_error = None
+        return result
+
+    def _fail(self, req: GuardRequest, why: str) -> JudgeResult:
+        self.last_error = why[:300]
+        log.warning("judge unavailable for %s: %s", req.request_id, self.last_error)
+        return _unavailable()

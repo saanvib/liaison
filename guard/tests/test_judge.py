@@ -59,6 +59,19 @@ def test_client_error_gives_needs_review_judge_unavailable(error):
     assert (r.verdict, r.reason) == (Verdict.NEEDS_REVIEW, JUDGE_UNAVAILABLE)
 
 
+def test_failure_reason_is_recorded_and_logged(caplog):
+    judge = Judge(FakeLLM(error=LLMError("400 bad request")))
+    with caplog.at_level("WARNING", logger="guard.judge"):
+        judge.assess(REQ)
+    assert "400 bad request" in judge.last_error and "400 bad request" in caplog.text
+    judge.llm = FakeLLM("not json")
+    judge.assess(REQ)
+    assert judge.last_error == "malformed judge reply"
+    judge.llm = FakeLLM(reply())
+    judge.assess(REQ)
+    assert judge.last_error is None
+
+
 def test_parse_result_accepts_needs_review_with_category():
     r = parse_result(reply("needs_review", "off_label", "unclear sample type"))
     assert r.verdict == Verdict.NEEDS_REVIEW and r.category == GuardCategory.OFF_LABEL
@@ -140,6 +153,15 @@ def test_anthropic_llm_returns_text_and_sends_schema():
 def test_anthropic_llm_unusable_responses_raise_llm_error(stub):
     with pytest.raises(LLMError):
         _llm_with(stub).complete("sys", "prompt")
+
+
+def test_anthropic_llm_sends_workspace_header_when_set(monkeypatch):
+    pytest.importorskip("anthropic")
+    monkeypatch.setenv("LLM_WORKSPACE_ID", "wrkspc_test")
+    client = AnthropicLLM(api_key="test-key")._get_client()  # builds the client; no request is made
+    assert client.default_headers.get("anthropic-workspace-id") == "wrkspc_test"
+    monkeypatch.delenv("LLM_WORKSPACE_ID")
+    assert "anthropic-workspace-id" not in AnthropicLLM(api_key="test-key")._get_client().default_headers
 
 
 def test_anthropic_llm_without_key_raises_llm_error(monkeypatch):

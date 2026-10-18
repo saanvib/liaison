@@ -1,0 +1,112 @@
+# Synthetic expert directory (D10, D11). No real people.
+# Each summary line is matched separately (job-description bullets, project and meeting-note snippets),
+# and an expert scores as their best-matching line, so keep lines short and on one subject.
+# Don't put product names (e.g. GX-200) in summaries: most questions mention the product, so the
+# name would pull unrelated questions toward whoever's line contains it.
+# The Slack IDs here must equal APPROVER_ALLOWLIST in the Vendor Agent's env:
+#   python -m experts.print_allowlist
+
+experts:
+  - id: rnd-rivera
+    slack_user_id: U_RND_1
+    display_name: Dr. Rivera
+    role: Senior Scientist, Assay Development
+    topics: [rd]
+    summary: |
+      Leads assay development for the DNA extraction kits.
+      Lysis chemistry, binding buffers and elution conditions.
+      DNA and RNA yield, purity and inhibitor carryover in the eluate.
+      Proteinase K digestion time and incubation temperature.
+      Project: limit of detection, sensitivity and reproducibility for low-input samples.
+      Meeting notes: low yield from plasma fixed with an extra wash step.
+
+  - id: rnd-natarajan
+    slack_user_id: U_RND_2
+    display_name: Dr. Natarajan
+    role: Application Scientist, Sample Preparation
+    topics: [rd]
+    summary: |
+      Customer protocols for sample preparation and sample handling.
+      Sample input volumes for serum, plasma and whole blood.
+      Sample storage, freeze-thaw cycles and transport of samples.
+      Downstream PCR, qPCR and sequencing workflows.
+      Troubleshooting high Ct values, failed amplification and contaminated negative controls.
+      Meeting notes: spin column clogging and centrifuge speed during the protocol.
+
+  - id: qara-bell
+    slack_user_id: U_QARA_1
+    display_name: Marcus Bell
+    role: Regulatory Affairs Manager
+    topics: [qa_ra]
+    summary: |
+      Regulatory status of products: Research Use Only (RUO) versus IVD.
+      Intended use statements, labeling and IFU claims.
+      CE marking, IVDR and EU regulatory requirements.
+      FDA registration and US regulatory questions.
+      Compliance declarations such as REACH and RoHS.
+      Meeting notes: reviewed marketing claims on a datasheet for regulatory compliance.
+
+  - id: qara-hoffmann
+    slack_user_id: U_QARA_2
+    display_name: Lena Hoffmann
+    role: Quality Assurance Specialist
+    topics: [qa_ra]
+    summary: |
+      Lot release and certificates of analysis (CoA) for kit lots.
+      Quality management system and ISO 13485 audits.
+      Customer complaints, nonconformance investigations and CAPA.
+      Product recalls and field safety notices.
+      Stability studies, shelf life and expiry dates of reagents.
+      Meeting notes: supplied lot traceability records for a customer audit.
+
+  - id: eng-alvarez
+    slack_user_id: U_ENG_1
+    display_name: Tom Alvarez
+    role: Instrument Engineer
+    topics: [engineering]
+    summary: |
+      GX analyzer hardware, firmware and field service.
+      Analyzer error codes, including E42 lid sensor errors.
+      Instrument calibration and preventive maintenance.
+      Heater temperature, motors, sensors and the centrifuge module.
+      Analyzer installation and installation qualification.
+      Meeting notes: diagnosed an analyzer power failure and motor noise.
+
+  - id: eng-chen
+    slack_user_id: U_ENG_2
+    display_name: Sofia Chen
+    role: Software Engineer, Analyzer Software
+    topics: [engineering]
+    summary: |
+      Analyzer control software and run reports.
+      Data export of run results to CSV and LIMS.
+      LIMS integration API and barcode sample tracking.
+      Software updates, user accounts and audit trail logging.
+      Control PC setup and Windows compatibility.
+      Meeting notes: fixed a data export bug that dropped sample IDs from run reports.
+
+  - id: sales-lee
+    slack_user_id: U_SALES_1
+    display_name: Jordan Lee
+    role: Sales Operations Manager
+    topics: [sales_ops]
+    summary: |
+      Pricing, quotes and discounts for kits and analyzers.
+      Contract terms, volume agreements and multi-year supply contracts.
+      Distributor pricing and partner agreements.
+      Purchase orders, invoices and payment terms.
+      Service contracts and warranty extensions.
+      Meeting notes: prepared a quote for a bulk order of 500 kits.
+
+  - id: sales-rahman
+    slack_user_id: U_SALES_2
+    display_name: Aisha Rahman
+    role: Order and Logistics Coordinator
+    topics: [sales_ops]
+    summary: |
+      Order status, shipping and delivery dates.
+      Backorders, stock levels and lead times for kits and spare parts.
+      Dry ice packaging and cold chain shipping.
+      International shipments, customs and import documents.
+      Damaged or lost packages and replacement shipments.
+      Meeting notes: expedited a delayed shipment for a customer.

@@ -53,20 +53,20 @@ def test_unknown_expert_id_is_rejected(tmp_path):
 # --- building evidence ----------------------------------------------------------
 
 def test_attributes_commits_and_prs(evidence):
-    assert "Retry LIMS upload when the hospital network drops the connection" in texts(evidence, "eng-chen")
-    assert "Add door interlock check before the centrifuge spins up" in texts(evidence, "eng-alvarez")
+    assert "Retry LIMS upload when the hospital network drops the connection" in texts(evidence, "manasvini")
+    assert "Add door interlock check before the centrifuge spins up" in texts(evidence, "manasvini")
     pr = next(e for e in evidence if e.source == "github_pr")
     assert pr.url.startswith("https://github.com/") and pr.date
 
 
 def test_pr_text_is_title_plus_first_paragraph(evidence):
-    audit = next(t for t in texts(evidence, "eng-chen") if t.startswith("Keep audit trail"))
+    audit = next(t for t in texts(evidence, "manasvini") if t.startswith("Keep audit trail"))
     assert "21 CFR Part 11" in audit and "migration" not in audit
 
 
 def test_commit_email_maps_when_no_linked_account(evidence):
     # The heater commit has author=null and a differently cased email.
-    assert any(t.startswith("Reduce heater block overshoot") for t in texts(evidence, "eng-alvarez"))
+    assert any(t.startswith("Reduce heater block overshoot") for t in texts(evidence, "manasvini"))
 
 
 @pytest.mark.parametrize("dropped", ["fix typo", "Merge pull request", "Bump urllib3", "dark mode"])
@@ -76,8 +76,8 @@ def test_noise_is_dropped(evidence, dropped):
 
 
 def test_labels_refs_and_product_names_are_stripped(evidence):
-    assert "Add template for supplier qualification audits" in texts(evidence, "qara-hoffmann")
-    hl7 = [t for t in texts(evidence, "eng-chen") if "HL7" in t]
+    assert "Add template for supplier qualification audits" in texts(evidence, "neha")
+    hl7 = [t for t in texts(evidence, "manasvini") if "HL7" in t]
     assert hl7 == ["Add HL7 result messages for the LIMS bridge"]  # squash duplicate kept once, no GX-200 or #57
 
 
@@ -110,7 +110,7 @@ def test_clean(raw, cleaned):
 def test_newest_first_and_capped(sources):
     sources.max_per_expert = 1
     ev = ig.build_evidence(ig.FixtureGitHub(), sources)
-    assert texts(ev, "eng-chen") == [
+    assert texts(ev, "manasvini") == [
         "Keep audit trail entries when a user account is deactivated. Deactivating an operator deleted "
         "their audit trail rows, which breaks 21 CFR Part 11 review"
     ]
@@ -160,9 +160,9 @@ def with_evidence(evidence, tmp_path):
 @pytest.mark.parametrize(
     "question, expert_id",
     [
-        ("Our LIMS upload fails whenever the network connection drops", "eng-chen"),
-        ("Does the centrifuge have a door interlock?", "eng-alvarez"),
-        ("Do you have a template for supplier qualification audits?", "qara-hoffmann"),
+        ("Our LIMS upload fails whenever the network connection drops", "manasvini"),
+        ("Does the centrifuge have a door interlock?", "manasvini"),
+        ("Do you have a template for supplier qualification audits?", "neha"),
     ],
 )
 def test_evidence_names_experts_profiles_miss(with_evidence, question, expert_id):
@@ -198,9 +198,9 @@ def test_write_evidence_leaves_no_temp_file(evidence, tmp_path):
 
 
 def test_evidence_weight_scales_score():
-    rivera = next(e for e in DIRECTORY if e.id == "rnd-rivera")
+    saanvi = next(e for e in DIRECTORY if e.id == "saanvi")
     q = "zebrafish embryo imaging pipeline"
-    m = Matcher([rivera], BagOfWordsEmbedder(), threshold=0.0, evidence={"rnd-rivera": [q]}, evidence_weight=0.5)
+    m = Matcher([saanvi], BagOfWordsEmbedder(), threshold=0.0, evidence={"saanvi": [q]}, evidence_weight=0.5)
     assert m.match(q).score == pytest.approx(0.5)
 
 
@@ -212,4 +212,4 @@ def test_main_writes_evidence_and_default_matcher_uses_it(capsys):
     assert ig.main(["--fixture", "--out", str(matcher_mod.EVIDENCE_PATH)]) == 0
     assert "wrote 8 chunks" in capsys.readouterr().err
     r = matcher_mod.default_matcher().match("Does the centrifuge have a door interlock?")
-    assert r.expert.id == "eng-alvarez"
+    assert r.expert.id == "manasvini"

@@ -14,7 +14,7 @@ from tests.conftest import EXPERT, ROUTER_ADDRESS
 
 STORAGE_Q = "How should I store the extraction kit?"
 UNKNOWN_Q = "Can the kit be shipped at room temperature overnight?"
-NOTE = "Expert answer (Dr. Rivera, rd, 2026-10-17)"
+NOTE = "Expert answer (Saanvi, rd, 2026-10-17)"
 
 
 def kb_entries(loop):

@@ -25,7 +25,7 @@ GUARD_ADDRESS = "agent1q-guard"
 INGEST_ADDRESS = "agent1q-ingest"
 EXTERNAL = "agent1q-asi-one-user"
 SLACK_ASKER = "slack:U_ASKER"
-EXPERT = "U_RND_1|Dr. Rivera"
+EXPERT = "U0C9YESNKB7|Saanvi"
 TODAY = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
 
 # Short documents, one chunk each, so the offline embedder clears LOW_CONFIDENCE (0.5).

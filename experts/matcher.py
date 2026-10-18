@@ -166,9 +166,18 @@ class Matcher:
                 best_expert, best_score = expert, score
 
         if best_expert is not None and best_score >= self.threshold:
-            return MatchResult(best_expert, topic or best_expert.topics[0], best_score, fallback=False)
+            return MatchResult(best_expert, topic or self._topic_for(best_expert, question), best_score, fallback=False)
         inferred = topic or classify_topic(question) or DEFAULT_TOPIC
         return MatchResult(None, inferred, best_score, fallback=True)
+
+    @staticmethod
+    def _topic_for(expert: Expert, question: str) -> Topic:
+        """The expert's topic the question is about (keyword vote), else their first topic."""
+        if len(expert.topics) > 1:
+            voted = classify_topic(question)
+            if voted in expert.topics:
+                return voted
+        return expert.topics[0]
 
     def allowlist(self, topic: Topic) -> set[str]:
         return {e.slack_user_id for e in self.experts if topic in e.topics}

@@ -10,11 +10,11 @@ github:
     - liaison-demo/assay-analysis
     - liaison-demo/qms-docs
   authors:
-    schen: eng-chen
-    talvarez: eng-alvarez
-    tom.alvarez@example.com: eng-alvarez
-    pnatarajan: rnd-natarajan
-    lhoffmann: qara-hoffmann
+    schen: manasvini
+    talvarez: manasvini
+    tom.alvarez@example.com: manasvini
+    pnatarajan: saanvi
+    lhoffmann: neha
   # Removed from commit and PR text before matching. Product names appear in most questions, so
   # leaving them in would pull unrelated questions toward whoever commits most (see directory.yaml).
   ignore_terms: [GX-200, GX]

@@ -1,6 +1,7 @@
 """Document chunking, embedding, and search for the Vendor Agent's KB (Step 2)."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -9,8 +10,12 @@ from contracts import Citation, IngestDocument
 from vendor_agent.clients import Embedder, cosine
 
 CHUNK_SIZE = 800
-CHUNK_OVERLAP = 100
-_STORAGE_KEY = "vendor_agent:retrieval_chunks"
+# v2: structure-aware chunks with Gemini task-typed vectors. The v1 key (fixed 800-char windows,
+# random doc ids, duplicates from re-ingests) is simply never read again.
+_STORAGE_KEY = "vendor_agent:retrieval_chunks_v2"
+
+_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 class Storage(Protocol):
@@ -40,15 +45,60 @@ class Hit:
     score: float
 
 
-def _chunk(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    chunks = []
-    start, n = 0, len(text)
-    while start < n:
-        end = min(start + size, n)
-        chunks.append(text[start:end])
-        if end == n:
-            break
-        start = end - overlap
+@dataclass
+class Chunk:
+    location: Optional[str]  # the section heading, e.g. "Storage and stability"
+    text: str                # what gets embedded and cited: "<heading path>\n<block>"
+
+
+def _split_long(block: str, size: int) -> list[str]:
+    """Split a block over `size` on line ends, then on sentence ends, packing the pieces
+    back up to `size`. Only a single sentence over `size` is cut mid-sentence."""
+    if len(block) <= size:
+        return [block]
+    sep = "\n" if "\n" in block else " "
+    units = block.split("\n") if sep == "\n" else _SENTENCE_END.split(block)
+    if len(units) == 1:
+        return [block[i:i + size] for i in range(0, len(block), size)]
+    out: list[str] = []
+    for unit in units:
+        for piece in _split_long(unit, size):
+            if out and len(out[-1]) + len(sep) + len(piece) <= size:
+                out[-1] += sep + piece
+            else:
+                out.append(piece)
+    return out
+
+
+def chunk_document(text: str, size: int = CHUNK_SIZE) -> list[Chunk]:
+    """One chunk per paragraph, list or FAQ entry (blank-line-separated blocks), each
+    prefixed with its heading path so it carries its own context. A fact is never cut
+    in half: a block over `size` splits on line or sentence ends, not mid-sentence."""
+    chunks: list[Chunk] = []
+    headings: list[tuple[int, str]] = []  # the current heading path as (level, text)
+    block: list[str] = []
+
+    def flush() -> None:
+        body = "\n".join(block).strip()
+        block.clear()
+        if not body:
+            return
+        prefix = " > ".join(h for _, h in headings)
+        location = headings[-1][1] if len(headings) > 1 else None
+        for piece in _split_long(body, size - len(prefix) - 1):
+            chunks.append(Chunk(location=location, text=f"{prefix}\n{piece}" if prefix else piece))
+
+    for line in text.splitlines():
+        m = _HEADING.match(line)
+        if m:
+            flush()
+            level = len(m.group(1))
+            headings[:] = [h for h in headings if h[0] < level] + [(level, m.group(2))]
+        elif not line.strip():
+            flush()
+        else:
+            block.append(line.rstrip())
+    flush()
     return chunks
 
 
@@ -58,18 +108,22 @@ class Retriever:
         self.storage = storage
 
     def add_document(self, doc: IngestDocument) -> None:
-        chunks = _chunk(doc.text)
+        """Add `doc`'s chunks, replacing any already stored under the same doc_id, so
+        re-ingesting a file (stable doc_id from its name, see ingest.py) never duplicates it."""
+        chunks = chunk_document(doc.text)
         if not chunks:
             return
-        vectors = self.embedder.embed(chunks)
-        records = self.storage.get(_STORAGE_KEY) or []
-        for i, (text, vector) in enumerate(zip(chunks, vectors)):
+        # Documents and questions are embedded differently where the embedder supports it.
+        embed_documents = getattr(self.embedder, "embed_documents", self.embedder.embed)
+        vectors = embed_documents([c.text for c in chunks])
+        records = [r for r in self.storage.get(_STORAGE_KEY) or [] if r["doc_id"] != doc.doc_id]
+        for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
             records.append(
                 {
                     "doc_id": doc.doc_id,
                     "doc_title": doc.title,
-                    "location": f"chunk {i + 1}",
-                    "text": text,
+                    "location": chunk.location or f"chunk {i + 1}",
+                    "text": chunk.text,
                     "vector": vector,
                 }
             )

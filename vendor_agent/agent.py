@@ -204,6 +204,7 @@ def wire(
         if check is None:
             ctx.logger.info(f"late GuardVerdict for {msg.request_id}: its check already timed out")
             return
+        ctx.logger.info(f"GuardVerdict {check.stage}: {msg.verdict.value}/{msg.category.value}: {msg.reason}")
         await resume(ctx, check, msg)
 
     @agent.on_interval(period=SWEEP_PERIOD_S)

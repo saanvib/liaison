@@ -172,15 +172,31 @@ class GeminiEmbedder:
     """Embeddings via Gemini's REST API (batchEmbedContents), same account/key
     as LLMClient, no SDK dependency (see module docstring)."""
 
+    # 768 of gemini-embedding-001's 3072 dims: Google's recommended smaller size, and a quarter
+    # of the agent storage per chunk (cosine() normalizes, so truncated vectors compare fine).
+    DIMENSIONS = 768
+
     def __init__(self, api_key: str, model: Optional[str] = None, timeout_s: float = 10.0):
         self.api_key = api_key
         self.model = model or "gemini-embedding-001"
         self.timeout_s = timeout_s
 
     def embed(self, texts: Sequence[str]) -> list[Vector]:
+        """Questions: the asker's question, and KB entries' questions it's compared with."""
+        return self._embed(texts, "RETRIEVAL_QUERY")
+
+    def embed_documents(self, texts: Sequence[str]) -> list[Vector]:
+        """Document chunks, which questions are searched against (Retriever.add_document)."""
+        return self._embed(texts, "RETRIEVAL_DOCUMENT")
+
+    def _embed(self, texts: Sequence[str], task_type: str) -> list[Vector]:
         body = {
             "requests": [
-                {"model": f"models/{self.model}", "content": {"parts": [{"text": t}]}} for t in texts
+                {
+                    "model": f"models/{self.model}", "content": {"parts": [{"text": t}]},
+                    "taskType": task_type, "outputDimensionality": self.DIMENSIONS,
+                }
+                for t in texts
             ]
         }
         data = _gemini_post(GEMINI_EMBED_URL.format(model=self.model), self.api_key, body, self.timeout_s)

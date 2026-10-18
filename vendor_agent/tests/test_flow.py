@@ -12,7 +12,7 @@ from contracts import (
     Topic,
     Verdict,
 )
-from vendor_agent.clients import OfflineEmbedder
+from vendor_agent.clients import LLMError, OfflineEmbedder
 from vendor_agent.config import Config
 from vendor_agent.core import VendorCore
 from vendor_agent.kb import KnowledgeBase
@@ -346,3 +346,45 @@ async def test_embedding_runs_concurrently_with_the_screen():
 
     assert out.outcome == "answered"
     assert elapsed < 1.5 * delay  # concurrent: ~delay total, not ~2*delay serial
+
+
+# -- LLM unavailable (Gemini HTTP 429, seen live 2026-10-18) --
+
+class DownLLM(FakeLLM):
+    def draft(self, question, hits):
+        raise LLMError("HTTP 429: You exceeded your current quota")
+
+    def classify_topic(self, question):
+        raise LLMError("HTTP 429: You exceeded your current quota")
+
+
+@pytest.mark.asyncio
+async def test_llm_down_at_draft_still_replies_to_external_asker():
+    core, kb, retriever, storage, guard, llm = make_core(llm=DownLLM(), guard_verdicts=[APPROVED])
+    _seed_retrieval(retriever)
+    out = await core.handle_question("how long is the kit stable for?", EXTERNAL_SENDER, "chat:x")
+    assert out.outcome == "holding"
+    assert out.reply_text == team_role_reply(Topic.RND, core.config)
+    assert len(guard.calls) == 1  # no draft, so no draft check
+
+
+@pytest.mark.asyncio
+async def test_llm_down_escalates_internal_question_for_the_router_to_classify():
+    core, kb, retriever, storage, guard, llm = make_core(llm=DownLLM(), guard_verdicts=[APPROVED])
+    out = await core.handle_question("completely unrelated kayaking question", INTERNAL_SENDER, "slack:c:t:u1")
+    assert out.outcome == "escalated"
+    assert out.escalation.topic is None and out.escalation.draft_answer is None
+    assert kb.get_pending(out.escalation.escalation_id).flagged is False
+
+
+class DownEmbedder(OfflineEmbedder):
+    def embed(self, texts):
+        raise LLMError("HTTP 429: You exceeded your current quota")
+
+
+@pytest.mark.asyncio
+async def test_embeddings_down_still_replies():
+    core, kb, retriever, storage, guard, llm = make_core(embedder=DownEmbedder(), guard_verdicts=[APPROVED])
+    out = await core.handle_question("what is the shelf life?", EXTERNAL_SENDER, "chat:x")
+    assert out.outcome == "holding"
+    assert out.reply_text == team_role_reply(Topic.RND, core.config)

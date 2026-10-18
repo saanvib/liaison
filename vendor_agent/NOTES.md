@@ -18,11 +18,27 @@ python -m vendor_agent.ingest vendor_agent/docs_seed --direct
 `--direct` calls `VendorCore.handle_ingest` in-process and writes to the same on-disk KeyValueStore
 a later `python -m vendor_agent.agent` run reads (both are keyed by `VENDOR_SEED`'s derived
 address), so ingesting once before starting the agent persists. Without `--direct`, it sends each
-document over the network to `VENDOR_ADDRESS` instead — needs a running agent first.
+document over the network to `VENDOR_ADDRESS` instead — needs a running agent first:
 
-`docs_seed/seed_questions.md` is team reference material (sample questions), not a product
-document — `ingest.py` still reads it (doc_type `other`) if you ingest the whole folder, but it
-shouldn't be treated as something askers would actually ask about verbatim.
+```
+VENDOR_ADDRESS=agent1... python -m vendor_agent.ingest vendor_agent/docs_seed [--gap 30] [--port 8000]
+```
+
+- **One document every `--gap` seconds (default 30).** Hosted Agentverse handles messages in
+  parallel, and each ingest reads the chunk list, embeds (seconds, with Gemini) and writes it back,
+  so two documents ingested at once overwrite each other's chunks. Seen live 2026-10-18: of 5
+  documents sent together, the FAQ never made it into storage.
+- **`doc_id` is the file name**, so ingesting a file again replaces its chunks instead of adding a
+  second copy. Safe to re-run.
+- **`--port`:** the short-lived sender agent's local port, if 8000 is taken.
+- `docs_seed/seed_questions.md` is team reference material (sample questions), not a product
+  document, and `ingest.py` skips it: its questions would outrank the documents that answer them.
+
+Chunks are one paragraph, list or FAQ entry each, prefixed with their heading path, and cited by
+section ("Datasheet (Storage and stability)"). Gemini embeds them as `RETRIEVAL_DOCUMENT` and
+questions as `RETRIEVAL_QUERY`, at 768 dimensions. They're stored under
+`vendor_agent:retrieval_chunks_v2`; anything under the v1 key (fixed 800-character windows, which
+cut the shelf-life sentence in half live) is ignored, so re-seed after deploying this.
 
 ## Environment variables (`.env.example`)
 
@@ -48,14 +64,11 @@ shouldn't be treated as something askers would actually ask about verbatim.
   Worth a one-line heads-up to the team since it diverges from what's written there.
 - **Offline embedder calibration:** `OfflineEmbedder` (used whenever no `EMBEDDINGS_URL` and no
   `LLM_API_KEY`/Gemini key is set) is a crude binary bag-of-words. Its cosine score for a short
-  query against a long (~800-character) document chunk is bounded by roughly
-  `sqrt(|query tokens| / |chunk tokens|)`, regardless of how well the words actually match — so
-  even a near-verbatim question can legitimately score well below the default `LOW_CONFIDENCE`
-  (0.5) against real, longer seed documents. Confirmed empirically against `docs_seed/`: a
-  shelf-life question scored ~0.3 against the exact datasheet paragraph that answers it. This
-  isn't a bug in the question flow; it's a real limitation of the free fallback. A real Gemini
-  (or other) embeddings key gives much better retrieval; if running fully offline, consider
-  lowering `LOW_CONFIDENCE` or expect more escalations than a real embedder would produce.
+  query against a chunk is bounded by roughly `sqrt(|query tokens| / |chunk tokens|)`, regardless
+  of how well the words actually match. With the old 800-character windows a shelf-life question
+  scored ~0.3 against the paragraph that answers it; with one-entry chunks it scores 0.59 against
+  the FAQ entry (0.55 for the protocol-time question), above the default `LOW_CONFIDENCE` (0.5).
+  A real Gemini (or other) embeddings key still gives much better retrieval.
 - **Hosted Agentverse limits (A11) — built and verified:** per Person 2's probe (`guard/NOTES.md`),
   hosted Agentverse only supports flat top-level `.py` files (subfolders fail with
   `No module named '...'`) and can't find data files next to code. `python -m
@@ -88,6 +101,10 @@ shouldn't be treated as something askers would actually ask about verbatim.
   the shared doc's `UAgentGuardClient` (Future-based) design. `test_agent_wiring.py` runs each
   message on a freshly wired agent sharing only JSON storage; `smoke.py` uses a real fake-Guard
   agent in the Bureau. **Unverified hosted:** that `on_interval` fires on Agentverse.
+- **Gemini down or out of quota:** an `LLMError` (e.g. HTTP 429, hit live 2026-10-18 after a day of
+  testing on a free-tier key) anywhere in `VendorCore.advance` now escalates internal questions
+  (`low_confidence`, `topic=None` so the Router classifies) and gives external askers the R&D
+  team-or-role reply. Before, the asker got no reply at all.
 - **Live ASI:One check:** not yet run — the hosted package above is ready to deploy; the actual
   live deployment and the 3 required ASI:One scenarios haven't happened yet.
 - **`clock` and `router` constructor params on `VendorCore`:** accepted per the shared doc's

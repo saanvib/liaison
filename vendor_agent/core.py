@@ -30,9 +30,11 @@ from contracts import (
     GuardVerdict,
     IngestDocument,
     Source,
+    Topic,
     Verdict,
 )
 
+from vendor_agent.clients import LLMError
 from vendor_agent.models import AcceptResult, VendorOutput
 from vendor_agent.texts import HOLDING_TEXT, REFUSAL_TEXT, RETRY_TEXT, team_role_reply
 
@@ -138,7 +140,10 @@ class VendorCore:
                 if verdict is None or verdict.verdict == Verdict.BLOCKED:
                     embed_task.cancel()
                 else:
-                    [vector] = await embed_task
+                    try:
+                        [vector] = await embed_task
+                    except LLMError:
+                        vector = None  # advance() retries the embedding and handles a second failure
             step = self.advance(step, verdict, vector=vector)
         return step
 
@@ -154,11 +159,26 @@ class VendorCore:
     ) -> Union[PendingCheck, VendorOutput]:
         """Continue after `check`'s verdict (None = no verdict in time). `vector` is the
         question's embedding if the caller already has it; otherwise it's computed here."""
-        if check.stage == "screen":
-            return self._after_screen(check, verdict, vector)
-        if check.stage == "egress":
-            return self._after_egress(check, verdict)
-        return self._after_draft(check, verdict)
+        try:
+            if check.stage == "screen":
+                return self._after_screen(check, verdict, vector)
+            if check.stage == "egress":
+                return self._after_egress(check, verdict)
+            return self._after_draft(check, verdict)
+        except LLMError as e:
+            # Gemini down or out of quota (HTTP 429 live, 2026-10-18): without this the
+            # asker got no reply at all. Escalate internally, team-or-role reply externally.
+            logger.warning("LLM unavailable at %s for request_id=%s: %s", check.stage, check.request.request_id, e)
+            return self._llm_unavailable(check)
+
+    def _llm_unavailable(self, check: PendingCheck) -> VendorOutput:
+        internal = check.sender == self.config.router_address
+        escalation = Escalation(
+            escalation_id=str(uuid.uuid4()), question=check.question, reason=EscalationReason.LOW_CONFIDENCE,
+            topic=None, draft_answer=None, guard_verdict=None, asker_ref=check.asker_ref,
+        ) if internal else None
+        # No topic without the LLM: the Router classifies internal ones (topic=None); R&D otherwise.
+        return self._escalated_or_holding(internal, check.asker_ref, escalation, Topic.RND)
 
     def _after_screen(
         self, check: PendingCheck, verdict: Optional[GuardVerdict], vector: Optional[list[float]]

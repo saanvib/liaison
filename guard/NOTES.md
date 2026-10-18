@@ -28,6 +28,10 @@ Exit 0 = bar met (100% recall per blocker category, overall precision >= 80%), 1
 Costs a few cents (two short LLM calls per draft/egress row that passes the rules). Any "judge unavailable" row
 makes it exit 1 with the API error, so a dead judge can't pass. First live run (2026-10-17): PASS, 13/13 calls OK,
 overall precision 100%; `ungr-02` came back `off_label` instead of `ungrounded` (same verdict).
+Gemini run (2026-10-17, `gemini-3.6-flash`, free tier): PASS, 53/53 rows, recall and precision 100% in every
+category, no judge-unavailable rows or timeouts at the 4 s limit. Only 14 rows reach the LLM (the rules decide the
+rest), so this mostly shows the judge doesn't loosen anything. The free tier rate-limited 3 of 17 calls (HTTP 429);
+the eval counts a 429 as judge unavailable, so on the free tier rerun it or retry 429s around `make_llm()`.
 
 ## Behavior worth knowing
 - Mode comes from the request (A6): empty draft = screen (patient data only, set by `screen_rules` in `policy.json`); `VENDOR_AGENT` draft = rules, judge, grounding; `EXPERT` draft = rules, judge.

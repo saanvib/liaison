@@ -21,7 +21,7 @@ from contracts import GuardRequest, GuardVerdict
 
 from guard.core import GuardCore
 from guard.grounding import Grounding
-from guard.judge import Judge
+from guard.judge import JUDGE_UNAVAILABLE, Judge
 
 log = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ def build_core(policy: Optional[dict] = None) -> GuardCore:
     if not os.environ.get("LLM_API_KEY"):
         log.warning("LLM_API_KEY not set: judge unavailable, drafts that pass the rules will be needs_review")
         return GuardCore(judge=None, grounding=Grounding(), policy=policy)
-    from guard.llm import AnthropicLLM
+    from guard.llm import make_llm
 
-    llm = AnthropicLLM()
+    llm = make_llm()
     return GuardCore(judge=Judge(llm), grounding=Grounding(llm), policy=policy)
 
 
@@ -52,6 +52,9 @@ async def handle_request(
         return None
     verdict = await asyncio.to_thread(core.check, msg)
     ctx.logger.info(f"{msg.request_id}: {verdict.verdict.value}/{verdict.category.value}")
+    if verdict.reason == JUDGE_UNAVAILABLE and core.judge is not None and core.judge.last_error:
+        # The judge's own warning goes to Python logging, which hosted Agentverse doesn't show.
+        ctx.logger.warning(f"{msg.request_id}: judge unavailable: {core.judge.last_error}")
     await ctx.send(sender, verdict)
     return verdict
 

@@ -172,9 +172,9 @@ def format_report(report: Report, llm_mode: str) -> str:
 def build_core(llm_mode: str, policy: dict) -> GuardCore:
     if llm_mode == "fake":
         return GuardCore(judge=ApprovingJudge(), grounding=Grounding(), policy=policy)
-    from guard.llm import AnthropicLLM
+    from guard.llm import make_llm
 
-    llm = AnthropicLLM()
+    llm = make_llm()
     return GuardCore(judge=Judge(llm), grounding=Grounding(llm), policy=policy)
 
 

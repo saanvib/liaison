@@ -1,4 +1,4 @@
 # Compliance Guard. The rules, grounding and eval are standard library only.
 uagents>=0.22
-# Only for the real LLM judge; without it (or without LLM_API_KEY) the judge fails closed.
+# Only for an Anthropic judge (Gemini needs no package); without it the Anthropic judge fails closed.
 anthropic>=1.0

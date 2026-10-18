@@ -171,3 +171,85 @@ def test_anthropic_llm_without_key_raises_llm_error(monkeypatch):
     # and the judge turns that into needs_review, with no network touched
     r = Judge(AnthropicLLM()).assess(REQ)
     assert (r.verdict, r.reason) == (Verdict.NEEDS_REVIEW, JUDGE_UNAVAILABLE)
+
+
+# --- GeminiLLM (REST, standard library) -------------------------------------------
+
+import io
+import json as _json
+import urllib.error
+
+from guard.llm import GeminiLLM, make_llm
+
+
+def _gemini_reply(text, finish="STOP"):
+    return {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": finish}]}
+
+
+def _fake_urlopen(monkeypatch, payload=None, error=None):
+    seen = {}
+
+    def urlopen(req, timeout, context=None):
+        seen.update(url=req.full_url, key=req.get_header("X-goog-api-key"), body=_json.loads(req.data), timeout=timeout)
+        if error:
+            raise error
+        return io.BytesIO(_json.dumps(payload).encode())
+
+    monkeypatch.setattr("guard.llm.urllib.request.urlopen", urlopen)
+    return seen
+
+
+def test_gemini_llm_request_shape(monkeypatch):
+    seen = _fake_urlopen(monkeypatch, _gemini_reply(reply()))
+    llm = GeminiLLM(api_key="g-key", model="gemini-3.5-flash", timeout_s=3)
+    assert llm.complete("sys", "prompt", {"type": "object"}) == reply()
+    assert seen["url"] == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    assert seen["key"] == "g-key" and "g-key" not in seen["url"]  # header, never the URL
+    assert seen["body"]["systemInstruction"] == {"parts": [{"text": "sys"}]}
+    assert seen["body"]["contents"] == [{"role": "user", "parts": [{"text": "prompt"}]}]
+    assert seen["body"]["generationConfig"]["responseJsonSchema"] == {"type": "object"}
+    assert seen["body"]["generationConfig"]["responseMimeType"] == "application/json"
+    assert seen["timeout"] == 3
+
+
+def test_gemini_llm_without_schema_sends_no_json_mode(monkeypatch):
+    seen = _fake_urlopen(monkeypatch, _gemini_reply("hi"))
+    GeminiLLM(api_key="k").complete("s", "p")
+    assert "responseJsonSchema" not in seen["body"]["generationConfig"]
+
+
+@pytest.mark.parametrize(
+    "payload, error, message",
+    [
+        (_gemini_reply('{"verdict": "appr', finish="MAX_TOKENS"), None, "MAX_TOKENS"),
+        (_gemini_reply("x", finish="SAFETY"), None, "SAFETY"),
+        ({"promptFeedback": {"blockReason": "SAFETY"}}, None, "SAFETY"),
+        (_gemini_reply(""), None, "no text"),
+        (None, TimeoutError("timed out"), "TimeoutError"),
+        (None, urllib.error.HTTPError("u", 404, "nf", {}, io.BytesIO(
+            b'{"error": {"message": "models/gemini-x is not found"}}')), "HTTP 404: models/gemini-x is not found"),
+    ],
+)
+def test_gemini_llm_unusable_responses_raise_llm_error(monkeypatch, payload, error, message):
+    _fake_urlopen(monkeypatch, payload, error)
+    with pytest.raises(LLMError, match=message):
+        GeminiLLM(api_key="k").complete("s", "p")
+
+
+def test_gemini_llm_without_key_fails_closed(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    r = Judge(GeminiLLM()).assess(REQ)
+    assert (r.verdict, r.reason) == (Verdict.NEEDS_REVIEW, JUDGE_UNAVAILABLE)
+
+
+@pytest.mark.parametrize(
+    "model, cls",
+    [("gemini-3.5-flash", GeminiLLM), ("Gemini-2.5-pro", GeminiLLM), ("claude-sonnet-5-5", AnthropicLLM), (None, AnthropicLLM)],
+)
+def test_make_llm_picks_provider_from_model(monkeypatch, model, cls):
+    if model:
+        monkeypatch.setenv("LLM_MODEL", model)
+    else:
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+    llm = make_llm()
+    assert isinstance(llm, cls) and llm.model == (model or "claude-sonnet-5-5")

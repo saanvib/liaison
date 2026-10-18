@@ -69,3 +69,24 @@ async def test_create_agent_has_stable_address_from_seed():  # async: Agent() ne
     b = create_agent(seed="liaison-dev-only test seed", allowed=frozenset(), core=GuardCore(), port=8199)
     assert a.address == b.address and a.address.startswith("agent1")
     assert a.name == "liaison-guard"
+
+
+async def test_judge_failure_reason_reaches_the_agent_log(caplog):
+    from contracts import Citation
+    from guard.judge import Judge
+    from guard.llm import LLMError
+
+    class FailingLLM:
+        def complete(self, system, prompt, schema=None):
+            raise LLMError("NotFoundError: model: gemini-3.5-flash")
+
+    draft = GuardRequest(
+        request_id="d1", source=Source.VENDOR_AGENT, question="How do I store the kit?",
+        draft_answer="Store the kit at 2 to 8 C.",
+        citations=[Citation(doc_id="ifu", doc_title="IFU", snippet="Store the kit at 2 to 8 C.")],
+    )
+    ctx = FakeCtx()
+    with caplog.at_level(logging.WARNING, logger="fake-ctx"):
+        v = await handle_request(ctx, VENDOR, draft, GuardCore(judge=Judge(FailingLLM())), frozenset({VENDOR}))
+    assert v.verdict == Verdict.NEEDS_REVIEW
+    assert "d1: judge unavailable: LLMError: NotFoundError: model: gemini-3.5-flash" in caplog.text

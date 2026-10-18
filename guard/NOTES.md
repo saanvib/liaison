@@ -15,8 +15,8 @@ GUARD_SEED=... ALLOWED_SENDERS=... python -m guard.agent
 | `GUARD_SEED` | Seed for the Guard's stable address. Required. |
 | `ALLOWED_SENDERS` | Comma-separated Vendor and Router addresses (D14). Others are logged and dropped; empty drops all. |
 | `LLM_API_KEY` | Enables the LLM judge and LLM grounding. Unset: judge unavailable, drafts that pass the rules are `needs_review`. |
-| `LLM_WORKSPACE_ID` | Required if the key isn't scoped to one workspace (the API returns 400 otherwise); sent as `anthropic-workspace-id`. |
-| `LLM_MODEL` | Default `claude-sonnet-5-5` (A9). |
+| `LLM_MODEL` | Picks the provider: `gemini-*` uses the Gemini REST API (standard library, no package), anything else Anthropic. Default `claude-sonnet-5-5` (A9). Measured with `gemini-3.6-flash`: about 2 s per call, so a draft check (judge, then grounding) takes about 4.5 s. |
+| `LLM_WORKSPACE_ID` | Anthropic only. Required if the key isn't scoped to one workspace (the API returns 400 otherwise); sent as `anthropic-workspace-id`. |
 | `GUARD_LLM_TIMEOUT_S` | Per LLM call, default 4. A draft check makes up to two calls inside the Vendor's 10 s wait (D4). |
 | `GUARD_PORT` | Local port, default 8001. |
 
@@ -61,14 +61,18 @@ The Guard suite also passes on Python 3.10.12 with the hosted package versions (
 2. Agentverse: Launch an agent, then **Generate Agent** with a minimal prompt ("a minimal agent that logs hello on
    startup"). Open the code editor (Build).
 3. Replace `agent.py` with `dist/guard/agent.py`; create each other file in `dist/guard/` under the same name.
-4. Secrets: `ALLOWED_SENDERS` (Vendor and Router addresses), `LLM_API_KEY`, and if needed `LLM_WORKSPACE_ID`,
-   `LLM_MODEL`.
+4. Secrets: `ALLOWED_SENDERS` (Vendor and Router addresses), `LLM_API_KEY`, `LLM_MODEL` (e.g. `gemini-3.6-flash`),
+   and for an Anthropic key that works across workspaces `LLM_WORKSPACE_ID`.
 5. Run. The log should show `GUARD ready: address=... judge=on allowed_senders=N`. Send that address to Persons 1
    and 3 for `GUARD_ADDRESS`.
 6. Optional end-to-end check: a second hosted agent from `dist/smoke_client/` with secret `GUARD_ADDRESS`. Its log
    prints its own address; add it to the Guard's `ALLOWED_SENDERS`, rerun both, and expect three `SMOKE` lines:
    screen `blocked/patient_data`, draft `approved` (judge on) or `needs_review` (judge off), egress
    `blocked/pricing_contract`. Remove the client's address from `ALLOWED_SENDERS` afterwards.
+
+Gemini billing (2026-10-17): new Gemini API projects default to prepaid billing, a $0 prepaid balance returns
+HTTP 402 and does not fall back to the free tier, and Google Cloud free-trial credits don't cover the Gemini API.
+For the free tier, disable billing on the project. A 403 "blocked" means the key's API restrictions exclude it.
 
 Still unverified hosted: whether globals reset between messages affects anything (the Guard keeps no state).
 

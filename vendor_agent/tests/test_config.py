@@ -18,7 +18,7 @@ def test_config_from_env_dict_required_only():
     assert config.guard_timeout_s == 10.0
     assert config.kb_match_threshold == 0.85
     assert config.low_confidence == 0.5
-    assert config.llm_model == "claude-sonnet-5-5"
+    assert config.llm_model == "gemini-2.5-flash"
     assert config.team_roles[Topic.RND] == "our R&D team"
 
 
@@ -33,7 +33,7 @@ def test_config_from_env_dict_overrides():
             "KB_MATCH_THRESHOLD": "0.9",
             "LOW_CONFIDENCE": "0.3",
             "LLM_API_KEY": "sk-test",
-            "LLM_MODEL": "claude-sonnet-5-5",
+            "LLM_MODEL": "gemini-2.5-pro",
             "EMBEDDINGS_URL": "https://example.test/embed",
             "TEAM_ROLES": '{"sales_ops": "the sales team"}',
         }

@@ -34,11 +34,11 @@ class LLMError(Exception):
 
 
 class LLMClient:
-    """Claude via the official SDK, for drafting answers and classifying topics."""
+    """Gemini via the official SDK, for drafting answers and classifying topics."""
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, timeout_s: float = 8.0):
         self.api_key = api_key or os.environ.get("LLM_API_KEY")
-        self.model = model or os.environ.get("LLM_MODEL") or "claude-sonnet-5-5"
+        self.model = model or os.environ.get("LLM_MODEL") or "gemini-2.5-flash"
         self.timeout_s = timeout_s
         self._client = None
 
@@ -47,27 +47,27 @@ class LLMClient:
             if not self.api_key:
                 raise LLMError("LLM_API_KEY is not set")
             try:
-                import anthropic
+                from google import genai
             except ImportError as e:
-                raise LLMError("the 'anthropic' package is not installed") from e
-            self._client = anthropic.Anthropic(api_key=self.api_key, timeout=self.timeout_s, max_retries=0)
+                raise LLMError("the 'google-genai' package is not installed") from e
+            self._client = genai.Client(
+                api_key=self.api_key, http_options={"timeout": self.timeout_s * 1000}
+            )
         return self._client
 
     def _complete(self, system: str, prompt: str) -> str:
         client = self._get_client()
         try:
-            response = client.messages.create(
+            response = client.models.generate_content(
                 model=self.model,
-                max_tokens=1024,
-                system=system,
-                messages=[{"role": "user", "content": prompt}],
+                contents=prompt,
+                config={"system_instruction": system},
             )
         except Exception as e:  # SDK errors, timeouts, connection failures
             raise LLMError(f"{type(e).__name__}: {e}") from e
-        text = next((b.text for b in response.content if b.type == "text"), None)
-        if not text:
+        if not response.text:
             raise LLMError("completion had no text")
-        return text
+        return response.text
 
     def draft(self, question: str, hits: Sequence) -> str:
         context = "\n\n".join(f"[{h.doc_title}] {h.text}" for h in hits)

@@ -8,7 +8,7 @@ from typing import Mapping, Optional
 
 from contracts import Topic
 
-DEFAULT_LLM_MODEL = "claude-sonnet-5-5"
+DEFAULT_LLM_MODEL = "gemini-2.5-flash"
 DEFAULT_GUARD_TIMEOUT_S = 10.0
 DEFAULT_KB_MATCH_THRESHOLD = 0.85
 DEFAULT_LOW_CONFIDENCE = 0.5

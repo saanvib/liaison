@@ -101,6 +101,10 @@ cut the shelf-life sentence in half live) is ignored, so re-seed after deploying
   the shared doc's `UAgentGuardClient` (Future-based) design. `test_agent_wiring.py` runs each
   message on a freshly wired agent sharing only JSON storage; `smoke.py` uses a real fake-Guard
   agent in the Bureau. **Unverified hosted:** that `on_interval` fires on Agentverse.
+- **Gemini down or out of quota:** an `LLMError` (e.g. HTTP 429, hit live 2026-10-18 after a day of
+  testing on a free-tier key) anywhere in `VendorCore.advance` now escalates internal questions
+  (`low_confidence`, `topic=None` so the Router classifies) and gives external askers the R&D
+  team-or-role reply. Before, the asker got no reply at all.
 - **Live ASI:One check:** not yet run — the hosted package above is ready to deploy; the actual
   live deployment and the 3 required ASI:One scenarios haven't happened yet.
 - **`clock` and `router` constructor params on `VendorCore`:** accepted per the shared doc's

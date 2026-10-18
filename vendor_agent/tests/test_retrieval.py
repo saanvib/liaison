@@ -143,7 +143,7 @@ def test_confidence_uses_top_hit_score_and_handles_empty():
     assert 0.0 <= retriever.confidence(hits) <= 1.0
 
 
-def test_to_citations_maps_hits_and_truncates_snippet():
+def test_to_citations_maps_hits_and_carries_the_whole_chunk():
     retriever = make_retriever()
     retriever.add_document(IngestDocument(doc_id="d1", title="Datasheet", doc_type="datasheet", text="x" * 500))
     hits = retriever.search("x")
@@ -151,7 +151,17 @@ def test_to_citations_maps_hits_and_truncates_snippet():
     assert citations[0].doc_id == "d1"
     assert citations[0].doc_title == "Datasheet"
     assert citations[0].location == "chunk 1"
-    assert len(citations[0].snippet) <= 240
+    assert citations[0].snippet == hits[0].text
+
+
+def test_shelf_life_citation_snippet_states_the_number():
+    """The Guard grounds a draft against snippets only; a 240-char cut dropped "18 months"."""
+    retriever = make_retriever()
+    for doc in load_documents(DOCS_SEED):
+        retriever.add_document(doc)
+    hits = [h for h in retriever.search("shelf life", k=100) if h.location == "Storage and stability"]
+    [citation] = retriever.to_citations(hits)
+    assert SHELF_LIFE in citation.snippet
 
 
 @pytest.mark.parametrize("filename", ["datasheet.md", "ifu.md", "validation_report.md", "faq.md"])

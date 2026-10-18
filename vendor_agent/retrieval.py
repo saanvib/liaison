@@ -155,7 +155,10 @@ class Retriever:
         return hits[0].score if hits else 0.0
 
     def to_citations(self, hits: list[Hit]) -> list[Citation]:
+        # The whole chunk (<= CHUNK_SIZE), not a prefix: the Guard checks the draft's numbers and
+        # wording against these snippets only. A 240-char cut dropped "18 months" from the shelf-life
+        # chunk, so a correct draft failed grounding (seen live 2026-10-18).
         return [
-            Citation(doc_id=h.doc_id, doc_title=h.doc_title, snippet=h.text[:240], location=h.location)
+            Citation(doc_id=h.doc_id, doc_title=h.doc_title, snippet=h.text, location=h.location)
             for h in hits
         ]

@@ -155,6 +155,15 @@ def test_anthropic_llm_unusable_responses_raise_llm_error(stub):
         _llm_with(stub).complete("sys", "prompt")
 
 
+def test_anthropic_llm_sends_workspace_header_when_set(monkeypatch):
+    pytest.importorskip("anthropic")
+    monkeypatch.setenv("LLM_WORKSPACE_ID", "wrkspc_test")
+    client = AnthropicLLM(api_key="test-key")._get_client()  # builds the client; no request is made
+    assert client.default_headers.get("anthropic-workspace-id") == "wrkspc_test"
+    monkeypatch.delenv("LLM_WORKSPACE_ID")
+    assert "anthropic-workspace-id" not in AnthropicLLM(api_key="test-key")._get_client().default_headers
+
+
 def test_anthropic_llm_without_key_raises_llm_error(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     with pytest.raises(LLMError):

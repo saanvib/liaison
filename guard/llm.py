@@ -28,17 +28,20 @@ class LLMClient(Protocol):
 
 
 class AnthropicLLM:
-    """Claude via the official SDK. Configured by LLM_API_KEY, LLM_MODEL, GUARD_LLM_TIMEOUT_S."""
+    """Claude via the official SDK. Configured by LLM_API_KEY, LLM_MODEL, GUARD_LLM_TIMEOUT_S, and
+    LLM_WORKSPACE_ID (required when the key isn't scoped to one workspace; sent as anthropic-workspace-id)."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         timeout_s: Optional[float] = None,
+        workspace_id: Optional[str] = None,
     ):
         self.api_key = api_key or os.environ.get("LLM_API_KEY")
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
         self.timeout_s = timeout_s or float(os.environ.get("GUARD_LLM_TIMEOUT_S", DEFAULT_TIMEOUT_S))
+        self.workspace_id = workspace_id or os.environ.get("LLM_WORKSPACE_ID") or None
         self._client = None
 
     def _get_client(self):
@@ -49,8 +52,11 @@ class AnthropicLLM:
                 import anthropic
             except ImportError as e:
                 raise LLMError("the 'anthropic' package is not installed") from e
+            headers = {"anthropic-workspace-id": self.workspace_id} if self.workspace_id else None
             # No retries: a retry would blow the Guard's time budget; the caller fails closed.
-            self._client = anthropic.Anthropic(api_key=self.api_key, timeout=self.timeout_s, max_retries=0)
+            self._client = anthropic.Anthropic(
+                api_key=self.api_key, timeout=self.timeout_s, max_retries=0, default_headers=headers
+            )
         return self._client
 
     def complete(self, system: str, prompt: str, schema: Optional[dict] = None) -> str:

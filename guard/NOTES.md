@@ -15,6 +15,7 @@ GUARD_SEED=... ALLOWED_SENDERS=... python -m guard.agent
 | `GUARD_SEED` | Seed for the Guard's stable address. Required. |
 | `ALLOWED_SENDERS` | Comma-separated Vendor and Router addresses (D14). Others are logged and dropped; empty drops all. |
 | `LLM_API_KEY` | Enables the LLM judge and LLM grounding. Unset: judge unavailable, drafts that pass the rules are `needs_review`. |
+| `LLM_WORKSPACE_ID` | Required if the key isn't scoped to one workspace (the API returns 400 otherwise); sent as `anthropic-workspace-id`. |
 | `LLM_MODEL` | Default `claude-sonnet-5-5` (A9). |
 | `GUARD_LLM_TIMEOUT_S` | Per LLM call, default 4. A draft check makes up to two calls inside the Vendor's 10 s wait (D4). |
 | `GUARD_PORT` | Local port, default 8001. |

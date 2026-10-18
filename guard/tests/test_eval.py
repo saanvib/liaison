@@ -66,6 +66,23 @@ def test_low_precision_fails_the_eval():
     assert not report.passed
 
 
+def test_real_mode_fails_when_judge_was_unavailable(monkeypatch, capsys):
+    """A failing real judge must not pass the eval just because fail-closed keeps precision above the bar."""
+    from guard.eval import run_eval
+    from guard.judge import Judge
+    from guard.llm import LLMError
+
+    class DeadLLM:
+        def complete(self, system, prompt, schema=None):
+            raise LLMError("400 This API key is not scoped to a workspace")
+
+    monkeypatch.setenv("LLM_API_KEY", "dummy")
+    monkeypatch.setattr(run_eval, "build_core", lambda mode, policy: GuardCore(judge=Judge(DeadLLM()), grounding=Grounding(), policy=policy))
+    assert main(["--llm", "real"]) == 1
+    out = capsys.readouterr().out
+    assert "was not actually tested" in out and "not scoped to a workspace" in out
+
+
 def test_real_mode_without_key_is_a_setup_error(monkeypatch, capsys):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     assert main(["--llm", "real"]) == 2

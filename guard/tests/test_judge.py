@@ -59,6 +59,19 @@ def test_client_error_gives_needs_review_judge_unavailable(error):
     assert (r.verdict, r.reason) == (Verdict.NEEDS_REVIEW, JUDGE_UNAVAILABLE)
 
 
+def test_failure_reason_is_recorded_and_logged(caplog):
+    judge = Judge(FakeLLM(error=LLMError("400 bad request")))
+    with caplog.at_level("WARNING", logger="guard.judge"):
+        judge.assess(REQ)
+    assert "400 bad request" in judge.last_error and "400 bad request" in caplog.text
+    judge.llm = FakeLLM("not json")
+    judge.assess(REQ)
+    assert judge.last_error == "malformed judge reply"
+    judge.llm = FakeLLM(reply())
+    judge.assess(REQ)
+    assert judge.last_error is None
+
+
 def test_parse_result_accepts_needs_review_with_category():
     r = parse_result(reply("needs_review", "off_label", "unclear sample type"))
     assert r.verdict == Verdict.NEEDS_REVIEW and r.category == GuardCategory.OFF_LABEL

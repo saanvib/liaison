@@ -32,7 +32,7 @@ shouldn't be treated as something askers would actually ask about verbatim.
 | `GUARD_ADDRESS` | Where `GuardRequest`s are sent. |
 | `INGEST_ADDRESS` | Trusted sender for a non-`--direct` `IngestDocument`, alongside `ROUTER_ADDRESS`. |
 | `APPROVER_ALLOWLIST` | Comma-separated Slack IDs (A12); must equal `python -m experts.print_allowlist`'s output. |
-| `GUARD_TIMEOUT_S` | Screen/draft/egress Guard call timeout, default 10 (D4). |
+| `GUARD_TIMEOUT_S` | Screen/draft/egress Guard call timeout, default 10 (D4). **Set 45 on hosted Agentverse:** a hosted Vendor-to-Guard round trip measured 16-20 s (2026-10-18). |
 | `KB_MATCH_THRESHOLD` | Cosine similarity for a KB hit, default 0.85. |
 | `LOW_CONFIDENCE` | Retrieval confidence floor before escalating, default 0.5. |
 | `LLM_API_KEY`, `LLM_MODEL` | Gemini, via its REST API directly (no SDK — see "Hosted Agentverse limits" below), default model `gemini-3.6-flash`. |
@@ -77,6 +77,17 @@ shouldn't be treated as something askers would actually ask about verbatim.
   infrastructure. Deploying is: `python -m vendor_agent.hosted.build`, then paste each file in
   `dist/vendor/` into the hosted agent's editor under the same name (`agent.py` replaces the
   generated one), set the secrets below, run, and watch for `VENDOR ready: address=...` in the log.
+- **Guard calls are message-driven, not awaited (2026-10-18, option B):** live, every question
+  first became "retry" (uAgents runs one handler at a time, so `on_chat` awaiting a `GuardVerdict`
+  blocked the message carrying it), then got no reply at all after moving the wait to a background
+  task (hosted Agentverse doesn't keep in-memory state, a task or a Future, between messages). Now
+  `on_chat` saves a `PendingCheck` in agent storage and sends the `GuardRequest`; `on_verdict`
+  loads it by `request_id` and calls `VendorCore.advance`; `expire_guard_checks` (every 2 s) treats
+  a check past `GUARD_TIMEOUT_S` as no verdict. `on_verdict` accepts verdicts from `GUARD_ADDRESS`
+  only. `handle_question` runs the same steps in one call for tests and the loop test. This replaces
+  the shared doc's `UAgentGuardClient` (Future-based) design. `test_agent_wiring.py` runs each
+  message on a freshly wired agent sharing only JSON storage; `smoke.py` uses a real fake-Guard
+  agent in the Bureau. **Unverified hosted:** that `on_interval` fires on Agentverse.
 - **Live ASI:One check:** not yet run — the hosted package above is ready to deploy; the actual
   live deployment and the 3 required ASI:One scenarios haven't happened yet.
 - **`clock` and `router` constructor params on `VendorCore`:** accepted per the shared doc's

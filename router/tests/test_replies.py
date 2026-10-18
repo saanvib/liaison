@@ -3,6 +3,7 @@ from contracts import Topic
 
 from router import texts
 from router.store import ANSWERED, SENT
+from router.vendor_client import VendorResult
 from router.tests.conftest import (
     ASK_CHANNEL, ASK_TS, ASKER, ASKER_REF, OTHER, draft_escalation, escalation, flagged_escalation, needs_pr0,
 )
@@ -153,3 +154,18 @@ async def test_reminder_in_experts_channel_mentions_expert(rig):
     await rig.core.tick()
     (reminder,) = [p for p in rig.slack.posts if "Reminder" in p["text"]]
     assert reminder["channel"] == "C_EXPERTS" and "<@U_RND_1>" in reminder["text"]
+
+
+async def test_full_flow_when_asked_by_dm(rig):
+    """Asked in a DM to the bot: proposal and answer land in that DM thread; the expert still gets their own DM."""
+    dm, ts = "D_ASKER", "1900000000.000003"
+    rig.vendor.result = VendorResult("escalated", "", escalation(asker_ref=f"slack:{dm}:{ts}:{ASKER}"))
+    await rig.core.on_direct_message(ASKER, dm, ts, None, "What is the shelf life after opening?")
+    proposal = [p for p in rig.slack.posts if p["channel"] == dm][-1]
+    assert proposal["thread_ts"] == ts and "Dr. Rivera" in proposal["text"]
+    await rig.core.on_approve_ask("esc-1", ASKER, dm)
+    rec = rig.store.get("esc-1")
+    assert rec.channel_id == DM_RIVERA and rec.direct
+    await rig.core.on_direct_message("U_RND_1", DM_RIVERA, "1900000000.000004", rec.thread_ts, "30 days at 2-8 C.")
+    answer = rig.slack.posts[-2]  # then the thank-you note in the expert's DM
+    assert answer["channel"] == dm and answer["thread_ts"] == ts and "Answer from Dr. Rivera" in answer["text"]

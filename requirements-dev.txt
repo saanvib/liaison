@@ -1,0 +1,6 @@
+# Shared test tooling. Setup from the repo root:
+#   python3 -m venv .venv && source .venv/bin/activate   (optional, recommended)
+#   pip install -r contracts/requirements.txt -r requirements-dev.txt
+#   pytest
+pytest>=8
+pytest-asyncio>=0.23

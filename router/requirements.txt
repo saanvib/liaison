@@ -1,0 +1,3 @@
+# Router / Slack bot (runs locally). Also install contracts/requirements.txt and experts/requirements.txt.
+slack-bolt>=1.18
+uagents>=0.22

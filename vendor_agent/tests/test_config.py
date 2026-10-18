@@ -39,7 +39,7 @@ def test_config_from_env_dict_required_only():
     assert config.guard_timeout_s == 10.0
     assert config.kb_match_threshold == 0.85
     assert config.low_confidence == 0.5
-    assert config.llm_model == "gemini-2.5-flash"
+    assert config.llm_model == "gemini-3.6-flash"
     assert config.team_roles[Topic.RND] == "our R&D team"
 
 

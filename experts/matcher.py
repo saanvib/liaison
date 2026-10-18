@@ -3,9 +3,14 @@
 Each expert's role and summary lines are embedded as separate chunks; an expert
 scores as their best chunk's cosine similarity to the question. Below
 `threshold` the result is a fallback ("use the topic channel").
+
+Evidence chunks (GitHub commits and PRs, from `python -m experts.ingest_github`)
+are loaded from evidence.json when it exists and scored like summary lines,
+scaled by `evidence_weight` because a commit is weaker evidence than a profile.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -19,7 +24,9 @@ from contracts import Topic
 from experts.embed import Embedder, cosine, default_embedder, tokens
 
 DIRECTORY_PATH = Path(__file__).with_name("directory.yaml")
+EVIDENCE_PATH = Path(__file__).with_name("evidence.json")
 DEFAULT_THRESHOLD = 0.35
+DEFAULT_EVIDENCE_WEIGHT = 0.9
 # Topic when nothing matches and no keyword fires: application scientists take general product questions.
 DEFAULT_TOPIC = Topic.RND
 
@@ -96,6 +103,18 @@ def chunks(expert: Expert) -> list[str]:
     return [ln for ln in lines if ln]
 
 
+def load_evidence(path: Path = EVIDENCE_PATH) -> dict[str, list[str]]:
+    """Evidence texts per expert id; empty when the file is absent (no ingest has run)."""
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)["chunks"]
+    out: dict[str, list[str]] = {}
+    for c in raw:
+        out.setdefault(c["expert_id"], []).append(c["text"])
+    return out
+
+
 def classify_topic(question: str) -> Optional[Topic]:
     """Keyword vote; None when no keyword fires or the top topics tie."""
     words = tokens(question)
@@ -106,19 +125,32 @@ def classify_topic(question: str) -> Optional[Topic]:
 
 
 class Matcher:
-    def __init__(self, experts: list[Expert], embedder: Embedder, threshold: float = DEFAULT_THRESHOLD):
+    def __init__(
+        self,
+        experts: list[Expert],
+        embedder: Embedder,
+        threshold: float = DEFAULT_THRESHOLD,
+        evidence: Optional[dict[str, list[str]]] = None,
+        evidence_weight: float = DEFAULT_EVIDENCE_WEIGHT,
+    ):
         self.experts = experts
         self.embedder = embedder
         self.threshold = threshold
-        self._chunk_vectors: Optional[list[list[list[float]]]] = None
+        self.evidence = evidence or {}
+        self.evidence_weight = evidence_weight
+        self._chunk_vectors: Optional[list[list[tuple[float, list[float]]]]] = None
 
-    def _vectors(self) -> list[list[list[float]]]:
+    def _vectors(self) -> list[list[tuple[float, list[float]]]]:
+        """Per expert, (weight, vector) for each profile chunk then each evidence chunk."""
         if self._chunk_vectors is None:
-            per_expert = [chunks(e) for e in self.experts]
-            flat = self.embedder.embed([c for cs in per_expert for c in cs])
+            per_expert = [
+                [(1.0, c) for c in chunks(e)] + [(self.evidence_weight, t) for t in self.evidence.get(e.id, [])]
+                for e in self.experts
+            ]
+            flat = self.embedder.embed([t for cs in per_expert for _, t in cs])
             out, i = [], 0
             for cs in per_expert:
-                out.append(flat[i : i + len(cs)])
+                out.append([(w, v) for (w, _), v in zip(cs, flat[i : i + len(cs)])])
                 i += len(cs)
             self._chunk_vectors = out
         return self._chunk_vectors
@@ -129,7 +161,7 @@ class Matcher:
         for expert, vectors in zip(self.experts, self._vectors()):
             if topic is not None and topic not in expert.topics:
                 continue
-            score = max((cosine(q, v) for v in vectors), default=0.0)
+            score = max((w * cosine(q, v) for w, v in vectors), default=0.0)
             if score > best_score:
                 best_expert, best_score = expert, score
 
@@ -149,5 +181,5 @@ def default_matcher() -> Matcher:
     global _default
     if _default is None:
         threshold = float(os.environ.get("EXPERT_MATCH_THRESHOLD", DEFAULT_THRESHOLD))
-        _default = Matcher(load_directory(), default_embedder(), threshold)
+        _default = Matcher(load_directory(), default_embedder(), threshold, load_evidence(EVIDENCE_PATH))
     return _default

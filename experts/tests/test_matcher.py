@@ -14,11 +14,12 @@ DIRECTORY = load_directory()
 
 
 @pytest.fixture(autouse=True)
-def offline(monkeypatch):
-    """Every test runs with the offline embedder and a fresh default matcher."""
+def offline(monkeypatch, tmp_path):
+    """Every test runs with the offline embedder, no evidence file, and a fresh default matcher."""
     for var in ("EMBEDDINGS_URL", "EMBEDDINGS_API_KEY", "EMBEDDINGS_MODEL", "EXPERT_MATCH_THRESHOLD"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(matcher_mod, "_default", None)
+    monkeypatch.setattr(matcher_mod, "EVIDENCE_PATH", tmp_path / "no-evidence.json")
 
 
 @pytest.fixture
@@ -209,3 +210,16 @@ def test_http_embedder_request_shape(monkeypatch):
     assert emb.embed(["a", "b"]) == [[1.0, 0.0], [0.0, 1.0]]
     assert seen == {"url": "https://embeddings.example/v1/embeddings",
                     "body": {"input": ["a", "b"], "model": "some-model"}, "auth": "Bearer k"}
+
+
+def test_http_embedder_batches_large_inputs(monkeypatch):
+    sizes = []
+
+    def fake_urlopen(req, timeout):
+        n = len(json.loads(req.data)["input"])
+        sizes.append(n)
+        return io.BytesIO(json.dumps({"data": [{"embedding": [float(n)]}] * n}).encode())
+
+    monkeypatch.setattr("experts.embed.urllib.request.urlopen", fake_urlopen)
+    out = HttpEmbedder("https://embeddings.example").embed(["t"] * 200)
+    assert sizes == [96, 96, 8] and len(out) == 200

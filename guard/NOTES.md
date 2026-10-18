@@ -74,6 +74,11 @@ Gemini billing (2026-10-17): new Gemini API projects default to prepaid billing,
 HTTP 402 and does not fall back to the free tier, and Google Cloud free-trial credits don't cover the Gemini API.
 For the free tier, disable billing on the project. A 403 "blocked" means the key's API restrictions exclude it.
 
+Hosted smoke check passed (2026-10-17, `gemini-3.6-flash`): screen `blocked/patient_data`, draft `approved/none`
+("Passed rules, judge and grounding"), egress `blocked/pricing_contract`. Guard address:
+`agent1qwvssl42gs4t2nulq0q8h0hnhw0l0ykqj8m6e5wynunndmte8d9g7zty6cq`; `ALLOWED_SENDERS` is the Vendor Agent only (the
+Router sends the Guard nothing since D17).
+
 Still unverified hosted: whether globals reset between messages affects anything (the Guard keeps no state).
 
 ## Local quirk

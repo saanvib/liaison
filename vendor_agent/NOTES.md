@@ -35,7 +35,7 @@ shouldn't be treated as something askers would actually ask about verbatim.
 | `GUARD_TIMEOUT_S` | Screen/draft/egress Guard call timeout, default 10 (D4). |
 | `KB_MATCH_THRESHOLD` | Cosine similarity for a KB hit, default 0.85. |
 | `LOW_CONFIDENCE` | Retrieval confidence floor before escalating, default 0.5. |
-| `LLM_API_KEY`, `LLM_MODEL` | Gemini (`google-genai`), default model `gemini-3.6-flash`. |
+| `LLM_API_KEY`, `LLM_MODEL` | Gemini, via its REST API directly (no SDK — see "Hosted Agentverse limits" below), default model `gemini-3.6-flash`. |
 | `EMBEDDINGS_URL`, `EMBEDDINGS_API_KEY`, `EMBEDDINGS_MODEL` | Optional non-Gemini embeddings endpoint (OpenAI/Voyage-shaped). Unset: falls back to Gemini embeddings using `LLM_API_KEY` if that's set, else the fully offline bag-of-words embedder. |
 | `TEAM_ROLES` | Optional JSON override of the `Topic -> text` names used in `team_role_reply`. |
 | `VENDOR_SEED` | This agent's identity. Pick any secret phrase; never commit it, never reuse a dev seed for a real deployment. |
@@ -56,12 +56,16 @@ shouldn't be treated as something askers would actually ask about verbatim.
   isn't a bug in the question flow; it's a real limitation of the free fallback. A real Gemini
   (or other) embeddings key gives much better retrieval; if running fully offline, consider
   lowering `LOW_CONFIDENCE` or expect more escalations than a real embedder would produce.
-- **Hosted Agentverse limits (A11):** not yet verified whether a hosted Agentverse agent can hold
-  all of `vendor_agent/`'s modules and the `google-genai` dependency. If it can't: stop and tell
-  the team; do not switch hosting unilaterally.
-- **Live ASI:One check:** not yet run — gated on Person 3's hosting verification (merge-order
-  step 4 in the shared doc). Once run, the shared chat session URL and the Agentverse agent
-  profile URL go here.
+- **Hosted Agentverse limits (A11):** per Person 2's probe (`guard/NOTES.md`), hosted Agentverse
+  only supports flat top-level `.py` files — subfolders/packages fail (`No module named '...'`),
+  and files aren't found next to code (it runs from `/runners`), so `docs_seed/*.md` can't just
+  sit alongside code either. `vendor_agent/` is a real package (`vendor_agent.core`, etc.) that
+  also imports `from contracts import ...` — neither works hosted as-is. This is why `LLMClient`/
+  `GeminiEmbedder` were switched to raw HTTP already (the SDK wasn't available hosted either, same
+  probe). The remaining fix is the same one Person 2 used for the Guard: a flat build
+  (`vendor_agent/hosted/build.py`, gitignored `dist/`) that inlines the `contracts` messages,
+  flattens the module imports, and embeds `docs_seed/*.md` as Python string constants.
+- **Live ASI:One check:** not yet run — gated on building the flat hosted package above.
 - **`clock` and `router` constructor params on `VendorCore`:** accepted per the shared doc's
   exact signature but unused by `handle_question` itself — Step 5's agent wiring sends the chat
   reply and calls `router.send_escalation`, not `core.py` (confirmed by `handle_question`'s own

@@ -1,3 +1,2 @@
 # Vendor Agent. uagents comes from contracts/requirements.txt.
-# Only for the real LLM client; without it (or without LLM_API_KEY) LLMClient.draft/classify_topic raise.
-google-genai>=1.0
+# Everything else (chunking, retrieval, the Gemini LLM/embeddings clients) is standard library only.

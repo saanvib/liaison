@@ -11,4 +11,6 @@ Install: `pip install -r contracts/requirements.txt`. Each owner's directory pul
 | ApprovedAnswer | Router -> Vendor Agent | expert answer, Guard-approved; Vendor Agent writes it to the KB |
 | IngestDocument | Router -> Vendor Agent | doc dropped in #liaison-docs |
 
+`ApprovedAnswer.guard_verdict` is `Optional`, defaulting to `None`, because expert answers skip the Guard entirely.
+
 Ownership: Person 1 `vendor_agent/`, Person 2 `guard/`, Person 3 `router/` + root README. Nobody edits another's directory; changes to `contracts/` need all three.

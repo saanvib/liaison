@@ -96,7 +96,7 @@ class ApprovedAnswer(Model):
     answer: str
     topic: Topic
     approved_by: str                     # expert id/name, or "guard" if auto-approved
-    guard_verdict: GuardVerdict          # the approving verdict, for audit
+    guard_verdict: Optional[GuardVerdict] = None  # None for expert answers (the Guard is not applied to them)
     citations: List[Citation] = []
     asker_ref: Optional[str] = None
 

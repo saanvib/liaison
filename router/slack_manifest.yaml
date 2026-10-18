@@ -24,6 +24,7 @@ oauth_config:
       - commands
       - groups:history
       - im:history
+      - im:write
       - users:read
 settings:
   event_subscriptions:

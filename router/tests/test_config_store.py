@@ -1,7 +1,5 @@
 import pytest
 
-from contracts import Topic
-
 from router.config import Config
 from router.store import ANSWERED, PROPOSED, SENT, EscalationRecord, Store
 from router.tests.conftest import make_config
@@ -10,8 +8,7 @@ from router.tests.conftest import make_config
 def test_config_from_env_defaults_and_channels():
     c = make_config()
     assert c.vendor_wait_s == 30 and c.reminder_after_s == 900
-    assert c.topic_channel(Topic.SALES_OPS) == "C_SALES"
-    assert "C_REVIEW" in c.expert_channels()
+    assert c.experts_channel == "C_EXPERTS" and c.flagged_fallback_user == "U_REVIEWER"
 
 
 def test_config_missing_vars_exits():

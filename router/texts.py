@@ -10,7 +10,7 @@ ONLY_ASKER = "Only the person who asked can approve or cancel this."
 NOT_ALLOWED = "Only the matched expert or this topic's listed experts can answer this escalation."
 ALREADY_DONE = "This escalation has already been handled."
 CANCELLED = "Cancelled. Nothing was sent to an expert."
-EXPERT_CHANNEL_FAILED = "I couldn't post in the expert channel (is the bot invited?). Nothing was sent; you can click Approve again."
+EXPERT_DELIVERY_FAILED = "I couldn't deliver the question to the expert. Nothing was sent; you can click Approve again."
 FLAGGED_BANNER = ":warning: *Flagged: potentially classified information.* The automatic check could not screen this question. Handle it with care; the answer will not be stored."
 EXPERT_INSTRUCTIONS = "Reply in this thread. The first reply is sent to the asker as your answer."
 
@@ -29,13 +29,13 @@ def asked_via_command(user_id: str, question: str) -> str:
     return f"<@{user_id}> asked:\n{quote(question)}"
 
 
-def recipient_label(user_id: Optional[str], name: Optional[str], role: Optional[str], channel_id: str) -> str:
-    if user_id and name:
-        who = f"*{name}*" + (f", {role}" if role else "")
-        return f"{who} (<@{user_id}>) in <#{channel_id}>"
+def recipient_label(user_id: Optional[str], name: Optional[str], role: Optional[str], channel_id: str,
+                    direct: bool = True) -> str:
+    """Who gets the question: a person by DM, a person mentioned in the experts channel, or the channel."""
     if user_id:
-        return f"<@{user_id}> in <#{channel_id}>"
-    return f"the team channel <#{channel_id}>"
+        who = (f"*{name}*" + (f", {role}" if role else "") + f" (<@{user_id}>)") if name else f"<@{user_id}>"
+        return f"{who} by direct message" if direct else f"{who} in <#{channel_id}>"
+    return f"the experts channel <#{channel_id}>"
 
 
 def proposal_blocks(escalation_id: str, question: str, recipient: str, flagged: bool) -> tuple[str, list]:

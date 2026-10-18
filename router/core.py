@@ -5,8 +5,10 @@ person lookup, Vendor link, Slack client, store and clock are all injected
 (router/agent.py wires the real ones), so tests run offline with fakes.
 
 Rules (docs/work-split/person-3-router-slack.md): nothing goes to an expert before the
-asker approves (R16); a flagged question never calls the matcher and is never stored
-(D23, A5); only the matched expert plus the topic allowlist may reply or click (D11);
+asker approves (R16); the matched expert gets the question by DM, a no-match goes to
+EXPERTS_CHANNEL (team choice, see router/NOTES.md); a flagged question never calls the
+matcher, is DMed to the fixed reviewer and is never stored (D23, A5); only the matched
+expert plus the topic allowlist may reply or click (D11);
 the first allowed reply wins and one reminder goes out (D8); the answer goes back to
 the Vendor Agent as ApprovedAnswer(guard_verdict=None) (A4, D18).
 """
@@ -47,6 +49,7 @@ class SlackPort(Protocol):
     async def respond(self, response_url: str, text: str) -> None: ...                 # slash-command reply
     async def open_modal(self, trigger_id: str, view: dict) -> None: ...
     async def user_name(self, user_id: str) -> str: ...
+    async def open_dm(self, user_id: str) -> str: ...                                   # returns the DM channel ID
 
 
 class Vendor(Protocol):
@@ -120,6 +123,14 @@ class RouterCore:
             return
         await self.on_slack_question(user_id, channel_id, thread_ts, text)
 
+    async def on_direct_message(self, user_id: str, channel_id: str, ts: str, thread_ts: Optional[str],
+                                text: str) -> None:
+        """A DM to the bot: a reply if it's in an escalation thread the bot DMed, otherwise a question."""
+        if thread_ts and thread_ts != ts and self.store.find_by_thread(channel_id, thread_ts):
+            await self.on_thread_reply(channel_id, thread_ts, user_id, text)
+            return
+        await self.on_slack_question(user_id, channel_id, thread_ts or ts, text)
+
     async def on_slack_question(self, user_id: str, channel_id: str, thread_ts: str, text: str) -> None:
         asker_ref = make_asker_ref(channel_id, thread_ts, user_id)
         result = await self.vendor.ask(asker_ref, text)
@@ -152,18 +163,19 @@ class RouterCore:
         asker_channel, asker_thread, _ = where
         flagged = is_flagged(esc)
 
+        # The matched expert (or, flagged, the fixed reviewer) is DMed once the asker approves;
+        # with no recipient the question goes to EXPERTS_CHANNEL.
+        channel_id = self.config.experts_channel
         if flagged:
-            # D23: no matcher, no LLM; fixed reviewer in the fixed channel.
+            # D23: no matcher, no LLM; the fixed reviewer by DM.
             topic, expert_id, name, role = None, None, None, None
             recipient_user = self.config.flagged_fallback_user
-            channel_id = self.config.flagged_fallback_channel
             person = self.lookup_person(recipient_user)
             if person:
                 name, role = person
         else:
             result = await asyncio.to_thread(self.matcher, esc.question, esc.topic)
             topic = result.topic
-            channel_id = self.config.topic_channel(topic)
             expert = None if result.fallback else result.expert
             if expert is not None:
                 expert_id, recipient_user = expert.id, expert.slack_user_id
@@ -181,7 +193,7 @@ class RouterCore:
         )
         if not self.store.add(rec):
             return
-        recipient = texts.recipient_label(recipient_user, name, role, channel_id)
+        recipient = texts.recipient_label(recipient_user, name, role, channel_id, direct=bool(recipient_user))
         text, blocks = texts.proposal_blocks(esc.escalation_id, esc.question, recipient, flagged)
         ts = await self.slack.post(asker_channel, text, thread_ts=asker_thread, blocks=blocks)
         self.store.update(esc.escalation_id, proposal_ts=ts)
@@ -201,20 +213,33 @@ class RouterCore:
         if rec is None or not self.store.transition(escalation_id, [PROPOSED], APPROVED):
             return
         asker_channel, asker_thread, _ = parse_asker_ref(rec.asker_ref)
-        recipient = texts.recipient_label(rec.recipient_user_id, rec.recipient_name, rec.recipient_role, rec.channel_id)
-        text, blocks = texts.expert_post(escalation_id, rec.question, rec.recipient_user_id, rec.flagged,
-                                         rec.draft_answer, rec.guard_reason)
+        target, direct = rec.channel_id, False
+        if rec.recipient_user_id:
+            try:
+                target, direct = await self.slack.open_dm(rec.recipient_user_id), True
+            except SlackError as e:
+                log.warning("could not DM %s for %s: %s", rec.recipient_user_id, escalation_id, e.code)
+                if rec.flagged:  # D23: flagged text never goes to a shared channel
+                    await self._approve_failed(escalation_id, asker_channel, asker_thread)
+                    return
+        text, blocks = texts.expert_post(escalation_id, rec.question, None if direct else rec.recipient_user_id,
+                                         rec.flagged, rec.draft_answer, rec.guard_reason)
         try:
-            ts = await self.slack.post(rec.channel_id, text, blocks=blocks)
+            ts = await self.slack.post(target, text, blocks=blocks)
         except SlackError as e:
-            log.error("could not post escalation %s in %s: %s", escalation_id, rec.channel_id, e.code)
-            self.store.transition(escalation_id, [APPROVED], PROPOSED)
-            await self.slack.post(asker_channel, texts.EXPERT_CHANNEL_FAILED, thread_ts=asker_thread)
+            log.error("could not post escalation %s in %s: %s", escalation_id, target, e.code)
+            await self._approve_failed(escalation_id, asker_channel, asker_thread)
             return
-        self.store.transition(escalation_id, [APPROVED], SENT, thread_ts=ts, sent_at=self.clock())
+        self.store.transition(escalation_id, [APPROVED], SENT, channel_id=target, thread_ts=ts,
+                              sent_at=self.clock(), direct=direct)
         if rec.proposal_ts:
-            done = f"Sent to {recipient}. I'll post the answer here."
+            where = texts.recipient_label(rec.recipient_user_id, rec.recipient_name, rec.recipient_role, target, direct)
+            done = f"Sent to {where}. I'll post the answer here."
             await self.slack.update(asker_channel, rec.proposal_ts, done, blocks=texts.proposal_resolved(done))
+
+    async def _approve_failed(self, escalation_id: str, asker_channel: str, asker_thread: str) -> None:
+        self.store.transition(escalation_id, [APPROVED], PROPOSED)
+        await self.slack.post(asker_channel, texts.EXPERT_DELIVERY_FAILED, thread_ts=asker_thread)
 
     async def on_cancel_ask(self, escalation_id: str, user_id: str, channel_id: str) -> None:
         rec = await self._asker_only(escalation_id, user_id, channel_id)
@@ -322,4 +347,5 @@ class RouterCore:
         now = self.clock() if now is None else now
         for rec in self.store.due_reminders(now - self.config.reminder_after_s):
             if self.store.mark_reminded(rec.escalation_id):
-                await self.slack.post(rec.channel_id, texts.reminder(rec.recipient_user_id), thread_ts=rec.thread_ts)
+                mention = None if rec.direct else rec.recipient_user_id
+                await self.slack.post(rec.channel_id, texts.reminder(mention), thread_ts=rec.thread_ts)

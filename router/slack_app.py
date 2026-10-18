@@ -4,7 +4,8 @@ Every handler calls ack() as its very first statement (Slack's 3 s limit), then 
 the work to `dispatch`, which schedules the core coroutine on the agent's event loop.
 
 Entry points for a question: `/ask <question>` in a channel (the bot posts the question
-and answers in that post's thread), a DM to the bot, or an @mention.
+and answers in that post's thread), a DM to the bot, or an @mention. Experts get escalations
+by DM and answer in that DM's thread (or in EXPERTS_CHANNEL threads for a no-match).
 """
 from __future__ import annotations
 
@@ -48,8 +49,8 @@ def handlers(core: RouterCore, dispatch: Dispatch) -> dict[str, Callable]:
         thread_ts = event.get("thread_ts")
         if not user:
             return
-        if event.get("channel_type") == "im":
-            dispatch(core.on_mention(user, channel, thread_ts or ts, text))
+        if event.get("channel_type") == "im":  # a question, or an expert's reply in a thread the bot DMed
+            dispatch(core.on_direct_message(user, channel, ts, thread_ts, text))
         elif thread_ts and thread_ts != ts:  # a thread reply; the core ignores non-escalation threads
             dispatch(core.on_thread_reply(channel, thread_ts, user, text))
 
@@ -114,6 +115,9 @@ class SlackWebPort:
 
     async def open_modal(self, trigger_id: str, view: dict) -> None:
         await self._call("views_open", trigger_id=trigger_id, view=view)
+
+    async def open_dm(self, user_id: str) -> str:
+        return (await self._call("conversations_open", users=user_id))["channel"]["id"]
 
     async def user_name(self, user_id: str) -> str:
         user = (await self._call("users_info", user=user_id))["user"]

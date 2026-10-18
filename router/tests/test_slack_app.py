@@ -47,7 +47,8 @@ def test_app_mention_strips_mention(setup):
 def test_dm_is_a_question(setup):
     h, ack, log = setup
     h["message"](ack=ack, event={"user": "U1", "channel": "D1", "channel_type": "im", "ts": "1.1", "text": "hi?"})
-    assert_ack_first(log, "on_mention")
+    assert_ack_first(log, "on_direct_message")
+    assert log[1][2] == ("U1", "D1", "1.1", None, "hi?")
 
 
 def test_thread_reply_goes_to_core(setup):

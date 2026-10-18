@@ -28,13 +28,14 @@ class EscalationRecord:
     recipient_user_id: Optional[str]     # Slack ID mentioned in the expert post (None = channel only)
     recipient_name: Optional[str]
     recipient_role: Optional[str]
-    channel_id: str                      # where the expert post goes / went
+    channel_id: str                      # where the expert post went: the DM with the expert, or EXPERTS_CHANNEL
     thread_ts: Optional[str]             # ts of the expert post, once sent
     created_at: float
     sent_at: Optional[float] = None
     reminded: bool = False
     proposal_ts: Optional[str] = None    # ts of the proposal message in the asker's thread
     guard_reason: Optional[str] = None   # shown to the expert next to a draft
+    direct: bool = False                 # True once sent by DM to the recipient
 
 
 _COLUMNS = [f.name for f in fields(EscalationRecord)]
@@ -113,6 +114,6 @@ class Store:
 
 def _to_record(row: sqlite3.Row) -> EscalationRecord:
     data = dict(row)
-    for b in ("flagged", "has_draft", "reminded"):
+    for b in ("flagged", "has_draft", "reminded", "direct"):
         data[b] = bool(data[b])
     return EscalationRecord(**data)

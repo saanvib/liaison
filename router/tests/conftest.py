@@ -26,8 +26,7 @@ needs_pr0 = pytest.mark.skipif(not PR0_MERGED, reason="waits for PR0: ApprovedAn
 def make_config(**overrides) -> Config:
     env = dict(
         SLACK_BOT_TOKEN="xoxb-test", SLACK_APP_TOKEN="xapp-test", VENDOR_ADDRESS=VENDOR, ROUTER_SEED="seed",
-        CHANNEL_RD="C_RD", CHANNEL_QA_RA="C_QARA", CHANNEL_ENGINEERING="C_ENG", CHANNEL_SALES_OPS="C_SALES",
-        FLAGGED_FALLBACK_CHANNEL="C_REVIEW", FLAGGED_FALLBACK_USER="U_REVIEWER", ROUTER_STORE_PATH=":memory:",
+        EXPERTS_CHANNEL="C_EXPERTS", FLAGGED_FALLBACK_USER="U_REVIEWER", ROUTER_STORE_PATH=":memory:",
     )
     env.update(overrides)
     return Config.from_env(env)
@@ -74,6 +73,7 @@ class FakeSlack:
         self.responses: list[str] = []
         self.modals: list[dict] = []
         self.fail_channels: set[str] = set()
+        self.fail_dm: set[str] = set()
         self._n = 0
 
     async def post(self, channel, text, thread_ts=None, blocks=None):
@@ -95,6 +95,11 @@ class FakeSlack:
 
     async def open_modal(self, trigger_id, view):
         self.modals.append(dict(trigger_id=trigger_id, view=view))
+
+    async def open_dm(self, user_id):
+        if user_id in self.fail_dm:
+            raise SlackError("user_not_found")
+        return f"D_{user_id}"
 
     async def user_name(self, user_id):
         return f"name-of-{user_id}"

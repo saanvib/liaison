@@ -61,19 +61,19 @@ async def test_proposal_names_matched_expert_and_sends_nothing(rig):
     await rig.core.on_escalation(escalation())
     p = rig.proposal()
     assert p["thread_ts"] == ASK_TS
-    assert "Dr. Rivera" in p["text"] and "Senior Scientist" in p["text"] and "<#C_RD>" in p["text"]
+    assert "Dr. Rivera" in p["text"] and "Senior Scientist" in p["text"] and "by direct message" in p["text"]
     assert "What is the shelf life after opening?" in p["text"]
     assert rig.slack.action_ids(p) == ["approve_ask", "cancel_ask"]
-    assert rig.slack.in_channel("C_RD") == []
+    assert rig.slack.in_channel("D_U_RND_1") == [] and rig.slack.in_channel("C_EXPERTS") == []
     assert rig.matcher.calls == [("What is the shelf life after opening?", Topic.RND)]
 
 
-async def test_no_match_falls_back_to_topic_channel(rig):
+async def test_no_match_falls_back_to_experts_channel(rig):
     rig.matcher.result = MatchResult(None, Topic.SALES_OPS, 0.1, True)
     await rig.core.on_escalation(escalation(topic=None))
-    assert "the team channel <#C_SALES>" in rig.proposal()["text"]
+    assert "the experts channel <#C_EXPERTS>" in rig.proposal()["text"]
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
-    post = rig.expert_post("C_SALES")
+    post = rig.expert_post("C_EXPERTS")
     assert "<@" not in post["text"]
     assert rig.store.get("esc-1").topic == "sales_ops"
 
@@ -82,12 +82,14 @@ async def test_flagged_never_calls_matcher_and_uses_fixed_fallback(rig):
     await rig.core.on_escalation(flagged_escalation())
     assert rig.matcher.calls == []
     p = rig.proposal()
-    assert "potentially classified" in p["text"] and "<@U_REVIEWER>" in p["text"] and "<#C_REVIEW>" in p["text"]
+    assert "potentially classified" in p["text"] and "<@U_REVIEWER>" in p["text"] and "by direct message" in p["text"]
     rec = rig.store.get("esc-1")
-    assert rec.flagged and rec.topic is None and rec.channel_id == "C_REVIEW"
+    assert rec.flagged and rec.topic is None
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
-    post = rig.expert_post("C_REVIEW")
-    assert texts.FLAGGED_BANNER in post["text"] and "<@U_REVIEWER>" in post["text"]
+    post = rig.expert_post("D_U_REVIEWER")
+    assert texts.FLAGGED_BANNER in post["text"]
+    rec = rig.store.get("esc-1")
+    assert rec.channel_id == "D_U_REVIEWER" and rec.direct and rig.slack.in_channel("C_EXPERTS") == []
 
 
 async def test_draft_escalation_is_not_flagged(rig):
@@ -121,18 +123,20 @@ async def test_only_asker_can_click(rig):
     await rig.core.on_cancel_ask("esc-1", OTHER, ASK_CHANNEL)
     assert [e["user"] for e in rig.slack.ephemerals] == [OTHER, OTHER]
     assert all(e["text"] == texts.ONLY_ASKER for e in rig.slack.ephemerals)
-    assert rig.store.get("esc-1").state == PROPOSED and rig.slack.in_channel("C_RD") == []
+    assert rig.store.get("esc-1").state == PROPOSED and rig.slack.in_channel("D_U_RND_1") == []
 
 
 async def test_approve_posts_to_expert_once(rig):
     await rig.core.on_escalation(escalation())
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)  # double click
-    posts = rig.slack.in_channel("C_RD")
+    posts = rig.slack.in_channel("D_U_RND_1")  # a DM to the matched expert
     assert len(posts) == 1
-    assert "<@U_RND_1>" in posts[0]["text"] and "shelf life" in posts[0]["text"]
+    assert "shelf life" in posts[0]["text"] and posts[0]["thread_ts"] is None
     rec = rig.store.get("esc-1")
     assert rec.state == SENT and rec.thread_ts == posts[0]["ts"] and rec.sent_at == rig.clock.t
+    assert rec.channel_id == "D_U_RND_1" and rec.direct
+    assert rig.slack.in_channel("C_EXPERTS") == []
     assert rig.slack.updates and rig.slack.action_ids(rig.slack.updates[-1]) == []  # buttons removed
 
 
@@ -141,23 +145,42 @@ async def test_cancel_posts_nothing_to_expert(rig):
     await rig.core.on_cancel_ask("esc-1", ASKER, ASK_CHANNEL)
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)  # too late
     assert rig.store.get("esc-1").state == CANCELLED
-    assert rig.slack.in_channel("C_RD") == []
+    assert rig.slack.in_channel("D_U_RND_1") == []
     assert rig.slack.updates[-1]["text"] == texts.CANCELLED
 
 
-async def test_expert_channel_failure_reverts_to_proposed(rig):
+async def test_post_failure_reverts_to_proposed(rig):
     await rig.core.on_escalation(escalation())
-    rig.slack.fail_channels.add("C_RD")
+    rig.slack.fail_channels.add("D_U_RND_1")
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
     assert rig.store.get("esc-1").state == PROPOSED
-    assert rig.slack.posts[-1]["text"] == texts.EXPERT_CHANNEL_FAILED
+    assert rig.slack.posts[-1]["text"] == texts.EXPERT_DELIVERY_FAILED
+
+
+async def test_dm_failure_falls_back_to_experts_channel_with_mention(rig):
+    rig.slack.fail_dm.add("U_RND_1")  # e.g. a placeholder ID that isn't in the workspace
+    await rig.core.on_escalation(escalation())
+    await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
+    post = rig.expert_post("C_EXPERTS")
+    assert "<@U_RND_1>" in post["text"]
+    rec = rig.store.get("esc-1")
+    assert rec.state == SENT and rec.channel_id == "C_EXPERTS" and not rec.direct
+
+
+async def test_flagged_dm_failure_never_posts_to_a_channel(rig):
+    rig.slack.fail_dm.add("U_REVIEWER")
+    await rig.core.on_escalation(flagged_escalation())
+    await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
+    assert rig.slack.in_channel("C_EXPERTS") == []
+    assert rig.store.get("esc-1").state == PROPOSED
+    assert rig.slack.posts[-1]["text"] == texts.EXPERT_DELIVERY_FAILED
 
 
 async def test_draft_case_shows_two_buttons_after_approval(rig):
     await rig.core.on_escalation(draft_escalation())
-    assert rig.slack.in_channel("C_RD") == []
+    assert rig.slack.in_channel("D_U_RND_1") == []
     await rig.core.on_approve_ask("esc-1", ASKER, ASK_CHANNEL)
-    post = rig.expert_post("C_RD")
+    post = rig.expert_post("D_U_RND_1")
     assert rig.slack.action_ids(post) == ["approve_draft", "edit_draft"]
     assert any("Store at 2-8 C" in b["text"]["text"] for b in post["blocks"] if b["type"] == "section")
     assert any("judge unsure" in b["text"]["text"] for b in post["blocks"] if b["type"] == "section")

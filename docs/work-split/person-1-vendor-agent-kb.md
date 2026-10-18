@@ -64,7 +64,8 @@ Create in `vendor_agent/`:
 - `@agent.on_message(ApprovedAnswer)` and `@agent.on_message(IngestDocument)` call the core; `@agent.on_message(GuardVerdict)` completes the pending `Future` for that `request_id`.
 - Implement `UAgentGuardClient` (sends `GuardRequest` to `GUARD_ADDRESS`, awaits a `Future` keyed by `request_id`, returns `None` on timeout) and `UAgentRouterClient` (sends `Escalation` and chat replies to `ROUTER_ADDRESS`).
 - Include the chat protocol with `publish_manifest=True` and a short `README.md` for the Agentverse profile.
-- **Done when:** the agent starts locally with the fake env, registers, and answers a hand-sent `ChatMessage` against the seeded docs. **If a hosted Agentverse agent can't hold several modules or the needed packages (A11, shared file), stop and tell the team; do not switch hosting yourself.**
+- **Live ASI:One check (you own this, once Person 3's verification confirms hosting works):** register the Vendor Agent on Agentverse, find it from ASI:One, and run a real chat as an external user: a documented question gets a cited answer, an unknown question gets the team-or-role reply, and a question with fake patient data is refused. Save the shared chat session URL and the Agentverse agent profile URL in `vendor_agent/NOTES.md`.
+- **Done when:** the agent starts locally with the fake env, registers, and answers a hand-sent `ChatMessage` against the seeded docs, and the live ASI:One check above has passed. **If a hosted Agentverse agent can't hold several modules or the needed packages (A11, shared file), stop and tell the team; do not switch hosting yourself.**
 
 ## Do not
 - Do not edit `guard/`, `experts/`, `router/`, `tests/`, `README.md`, `docs/designs/liaison.md`, `TODOS.md`.

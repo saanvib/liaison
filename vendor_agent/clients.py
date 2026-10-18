@@ -4,6 +4,11 @@ nothing here touches the network unless the real methods below are called.
 HttpEmbedder follows the same wire format experts/embed.py already settled on
 (OpenAI- and Voyage-compatible): POST {"model": ..., "input": [texts]} with a
 Bearer key, response {"data": [{"embedding": [...]}, ...]} in input order.
+
+LLMClient and GeminiEmbedder call Gemini's REST API directly over the standard
+library, not the google-genai SDK: guard/llm.py's hosted-Agentverse probe found
+only a fixed set of packages available there (anthropic, uagents, pydantic...),
+not google-genai, so an SDK-based client would fail to import hosted.
 """
 from __future__ import annotations
 
@@ -12,12 +17,46 @@ import json
 import math
 import os
 import re
+import ssl
+import urllib.error
 import urllib.request
 from typing import Optional, Protocol, Sequence
 
 from contracts import Escalation, GuardRequest, GuardVerdict, Topic
 
 Vector = list[float]
+
+GEMINI_GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents"
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """certifi's CA bundle when installed (python.org macOS builds ship none), else the system's."""
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _gemini_post(url: str, api_key: str, body: dict, timeout_s: float) -> dict:
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s, context=_ssl_context()) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        try:
+            detail = json.loads(detail)["error"]["message"]
+        except (ValueError, KeyError, TypeError):
+            pass
+        raise LLMError(f"HTTP {e.code}: {detail[:200]}") from e
+    except Exception as e:  # timeouts, connection and TLS failures: all fail closed upstream
+        raise LLMError(f"{type(e).__name__}: {e}") from e
 
 
 class GuardClient(Protocol):
@@ -34,40 +73,34 @@ class LLMError(Exception):
 
 
 class LLMClient:
-    """Gemini via the official SDK, for drafting answers and classifying topics."""
+    """Gemini via its REST API (generateContent, same shape as guard/llm.py's
+    GeminiLLM), for drafting answers and classifying topics."""
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, timeout_s: float = 8.0):
         self.api_key = api_key or os.environ.get("LLM_API_KEY")
         self.model = model or os.environ.get("LLM_MODEL") or "gemini-3.6-flash"
         self.timeout_s = timeout_s
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            if not self.api_key:
-                raise LLMError("LLM_API_KEY is not set")
-            try:
-                from google import genai
-            except ImportError as e:
-                raise LLMError("the 'google-genai' package is not installed") from e
-            self._client = genai.Client(
-                api_key=self.api_key, http_options={"timeout": self.timeout_s * 1000}
-            )
-        return self._client
 
     def _complete(self, system: str, prompt: str) -> str:
-        client = self._get_client()
-        try:
-            response = client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={"system_instruction": system},
-            )
-        except Exception as e:  # SDK errors, timeouts, connection failures
-            raise LLMError(f"{type(e).__name__}: {e}") from e
-        if not response.text:
+        if not self.api_key:
+            raise LLMError("LLM_API_KEY is not set")
+        body = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 1024},
+        }
+        data = _gemini_post(GEMINI_GENERATE_URL.format(model=self.model), self.api_key, body, self.timeout_s)
+        candidates = data.get("candidates") or []
+        if not candidates:
+            reason = (data.get("promptFeedback") or {}).get("blockReason", "no candidates")
+            raise LLMError(f"unusable completion ({reason})")
+        first = candidates[0]
+        if first.get("finishReason") != "STOP":
+            raise LLMError(f"unusable completion (finishReason={first.get('finishReason')})")
+        text = "".join(p.get("text", "") for p in first.get("content", {}).get("parts", []))
+        if not text:
             raise LLMError("completion had no text")
-        return response.text
+        return text
 
     def draft(self, question: str, hits: Sequence) -> str:
         context = "\n\n".join(f"[{h.doc_title}] {h.text}" for h in hits)
@@ -136,32 +169,22 @@ class HttpEmbedder:
 
 
 class GeminiEmbedder:
-    """Embeddings via the same google-genai SDK/account as LLMClient."""
+    """Embeddings via Gemini's REST API (batchEmbedContents), same account/key
+    as LLMClient, no SDK dependency (see module docstring)."""
 
     def __init__(self, api_key: str, model: Optional[str] = None, timeout_s: float = 10.0):
         self.api_key = api_key
         self.model = model or "gemini-embedding-001"
         self.timeout_s = timeout_s
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            try:
-                from google import genai
-            except ImportError as e:
-                raise LLMError("the 'google-genai' package is not installed") from e
-            self._client = genai.Client(
-                api_key=self.api_key, http_options={"timeout": self.timeout_s * 1000}
-            )
-        return self._client
 
     def embed(self, texts: Sequence[str]) -> list[Vector]:
-        client = self._get_client()
-        try:
-            response = client.models.embed_content(model=self.model, contents=list(texts))
-        except Exception as e:
-            raise LLMError(f"{type(e).__name__}: {e}") from e
-        return [e.values for e in response.embeddings]
+        body = {
+            "requests": [
+                {"model": f"models/{self.model}", "content": {"parts": [{"text": t}]}} for t in texts
+            ]
+        }
+        data = _gemini_post(GEMINI_EMBED_URL.format(model=self.model), self.api_key, body, self.timeout_s)
+        return [e["values"] for e in data["embeddings"]]
 
 
 def default_embedder(config) -> Embedder:

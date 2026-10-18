@@ -129,21 +129,15 @@ def build_core(storage=None, guard=None, router=None, config: Optional[Config] =
     )
 
 
-def create_agent(
-    config: Optional[Config] = None, core: Optional[VendorCore] = None, **agent_kwargs
-) -> tuple[Agent, VendorCore]:
-    config = config or Config.from_env()
-    agent = Agent(
-        name="liaison-vendor",
-        seed=config.vendor_seed,
-        description=(
-            "Liaison Vendor Agent: answers product questions with citations, "
-            "serves KB answers, escalates to a human when it can't answer, and "
-            "checks every question and answer with a Compliance Guard."
-        ),
-        **agent_kwargs,
-    )
+def wire(agent: Agent, config: Config, core: Optional[VendorCore] = None, storage=None) -> VendorCore:
+    """Attach every handler to `agent` (local or hosted-predefined) and return the
+    VendorCore it ends up using. Split out from create_agent() so the hosted
+    entry point (vendor_agent/hosted/entry.py) can call this on Agentverse's
+    predefined `agent` without constructing its own.
 
+    `storage` lets the hosted entry point pass `agent.storage` directly (no
+    VENDOR_SEED hosted -- Agentverse assigns the address, so there's nothing to
+    derive a KeyValueStore name from); local use derives one from VENDOR_SEED."""
     runtime: dict = {"ctx": None}
 
     async def send_text(address: str, text: str) -> None:
@@ -157,7 +151,8 @@ def create_agent(
 
     if core is None:
         core = build_core(
-            storage=_vendor_storage(config.vendor_seed), guard=guard_client, router=router_client, config=config
+            storage=storage if storage is not None else _vendor_storage(config.vendor_seed),
+            guard=guard_client, router=router_client, config=config,
         )
 
     chat_proto = Protocol(spec=chat_protocol_spec)
@@ -213,6 +208,24 @@ def create_agent(
     async def on_startup(ctx: Context):
         runtime["ctx"] = ctx
 
+    return core
+
+
+def create_agent(
+    config: Optional[Config] = None, core: Optional[VendorCore] = None, **agent_kwargs
+) -> tuple[Agent, VendorCore]:
+    config = config or Config.from_env()
+    agent = Agent(
+        name="liaison-vendor",
+        seed=config.vendor_seed,
+        description=(
+            "Liaison Vendor Agent: answers product questions with citations, "
+            "serves KB answers, escalates to a human when it can't answer, and "
+            "checks every question and answer with a Compliance Guard."
+        ),
+        **agent_kwargs,
+    )
+    core = wire(agent, config, core)
     return agent, core
 
 

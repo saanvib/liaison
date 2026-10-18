@@ -17,18 +17,19 @@ pids=()
 cleanup() { [ ${#pids[@]} -gt 0 ] && kill "${pids[@]}" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-start() {  # start <name> <module> <env file>
-  local name=$1 module=$2 envfile=$3
-  if [ ! -f "${module//.//}.py" ]; then echo "skip $name: $module is not in this checkout yet"; return 0; fi
+start() {  # start <name> <module or script.py> <env file>
+  local name=$1 module=$2 envfile=$3 file run
+  if [[ "$module" == *.py ]]; then file=$module; run=("$PY" "$module"); else file="${module//.//}.py"; run=("$PY" -m "$module"); fi
+  if [ ! -f "$file" ]; then echo "skip $name: $module is not in this checkout yet"; return 0; fi
   if [ ! -f "$envfile" ]; then echo "skip $name: $envfile missing (copy $envfile.example and fill it in)"; return 0; fi
-  ( set -a; . "$envfile"; set +a; exec "$PY" -m "$module" ) >"$LOG_DIR/$name.log" 2>&1 &
+  ( set -a; . "$envfile"; set +a; exec "${run[@]}" ) >"$LOG_DIR/$name.log" 2>&1 &
   pids+=($!)
   echo "started $name (pid $!), log: $LOG_DIR/$name.log"
 }
 
 if [ -z "${HOSTED:-}" ]; then
   start guard guard.agent guard/.env
-  start vendor vendor_agent.agent vendor_agent/.env
+  start vendor scripts/dev_vendor_local.py vendor_agent/.env  # adds a local endpoint so the Router can reach it
 fi
 start router router.agent router/.env
 

@@ -77,7 +77,7 @@ scripts/run_all.sh             # Guard, Vendor Agent and Router, each with its o
 HOSTED=1 scripts/run_all.sh    # Router only, with the Vendor Agent and Guard hosted on Agentverse
 ```
 
-Or start one agent at a time: `python -m guard.agent`, `python -m vendor_agent.agent`, `python -m router.agent`. In Slack, use `/ask <question>` in any channel the bot is in.
+Or start one agent at a time: `python -m guard.agent`, `python scripts/dev_vendor_local.py` (the Vendor Agent with a local endpoint, so the Router can reach it), `python -m router.agent`. For the local Vendor, set `VENDOR_ADDRESS` in `router/.env` to its printed address, and add that address to the Guard's `ALLOWED_SENDERS`. In Slack, use `/ask <question>` in any channel the bot is in.
 
 ## Seed documents
 
@@ -107,6 +107,8 @@ If any check fails, **stop and tell the team.** A failure reopens decision D6 (h
 | (a) Agentverse hosted package list and storage allow what the Vendor Agent and Guard need (an HTTP client, `json`, no local embedding library) | **Guard: pass. Vendor Agent: pending** | 2026-10-17 | Guard (Person 2): runs hosted with the standard library only; outbound HTTPS to Gemini works; the live smoke check passed (patient data blocked, draft approved by the Gemini judge, pricing blocked). Details in [`guard/NOTES.md`](guard/NOTES.md). The hosted echo agent also ran with `uagents`, the Chat Protocol and `ctx.storage`. Still to check: the Vendor Agent's own packages, once it's hosted (Person 1). |
 | (b) A `ChatMessage` round trip between the local Router and a hosted agent | **pass** | 2026-10-17 | The local Router (mailbox agent) and the hosted echo agent ([`scripts/verify/echo_agent_hosted.py`](scripts/verify/echo_agent_hosted.py)). `/ask hello` in Slack, then the A2 envelope to the hosted agent, then the A2 reply back, then "Echo from hosted agent: hello" in the Slack thread, well within 30 s. |
 | (c) A hosted KB write survives an agent restart | **pass (storage)** | 2026-10-17 | The echo agent keeps a message counter in `ctx.storage`. After Stop then Start on Agentverse, the next message was #3, so the count continued. Re-check with the real Vendor KB once Person 1's agent is hosted. |
+
+Full local end-to-end check (2026-10-18): with the Guard, Vendor Agent and Router all running locally (`scripts/run_all.sh`) on a real Gemini key (`LLM_MODEL=gemini-3.6-flash`) and the seed documents ingested, `/ask What is the shelf life of an unopened AuroraPrep kit?` in Slack was screened (approved), drafted by Gemini, approved by the Guard (rules, judge and grounding), and answered with citations in the thread.
 
 Local check (2026-10-17): `python -m router.agent` starts on uAgents 0.26.1, registers on the Almanac API and publishes the Chat Protocol manifest. The mailbox is connected via the agent's `/connect` endpoint with an Agentverse API key that has Mailbox write access (the inspector page could not reach localhost from the browser).
 

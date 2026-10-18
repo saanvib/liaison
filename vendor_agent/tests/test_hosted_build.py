@@ -1,0 +1,150 @@
+"""The flattened hosted build runs like hosted Agentverse: separate interpreter, flat
+files only (the repo's packages aren't importable), `agent` predefined, secrets as
+env vars, VENDOR_SEED unused (storage comes from agent.storage instead)."""
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from vendor_agent.hosted.build import BuildError, build, flatten
+
+# Runs inside the dist folder. Prints one JSON object with what the flattened
+# core actually did -- exercising ingest, retrieval and KB accept/lookup
+# directly (none of which need a live Guard), to prove the flattened modules
+# actually work together, not just that they import.
+RUNNER = r"""
+import asyncio, importlib.abc, importlib.machinery, importlib.util, json, logging, os, sys
+sys.path.insert(0, os.getcwd())
+
+# Hosted Agentverse loads sibling files without setting __file__ (seen live 2026-10-17).
+class NoFileLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    def find_spec(self, name, path, target=None):
+        if os.path.exists(name + ".py"):
+            return importlib.machinery.ModuleSpec(name, self)  # no origin, so no __file__
+    def create_module(self, spec):
+        return None
+    def exec_module(self, module):
+        # ...and the module isn't in sys.modules while its code runs (3.10 dataclasses trip on that).
+        own = sys.modules.pop(module.__name__, None)
+        try:
+            exec(compile(open(module.__name__ + ".py").read(), module.__name__ + ".py", "exec"), module.__dict__)
+        finally:
+            if own is not None:
+                sys.modules[module.__name__] = own
+
+sys.meta_path.insert(0, NoFileLoader())
+assert importlib.util.find_spec("vendor_agent") is None, "repo packages leaked onto sys.path"
+assert not os.path.exists("docs_seed"), "data files should never be read from disk hosted"
+
+from uagents import Agent
+
+class Ctx:
+    def __init__(self, agent):
+        self.agent, self.sent, self.logger = agent, [], logging.getLogger("ctx")
+    async def send(self, dest, msg):
+        self.sent.append((dest, json.loads(msg.json()) if hasattr(msg, "json") else msg))
+
+async def main():
+    import inspect
+    quiet = {"report_events": False} if "report_events" in inspect.signature(Agent).parameters else {}
+    agent = Agent(name="hosted-sim", seed="liaison-dev-only hosted sim", **quiet)
+    ns = {"agent": agent, "__name__": "__hosted__"}
+    exec(compile(open("agent.py").read(), "agent.py", "exec"), ns)
+
+    core = ns["CORE"]
+    out = {
+        "names": sorted(k for k in ns if not k.startswith("_")),
+        "vendor_seed_unused": core.config.vendor_seed is None,
+        "storage_is_agent_storage": core.storage is agent.storage,
+    }
+
+    from contracts import ApprovedAnswer, Escalation, EscalationReason, IngestDocument, Topic, Verdict, GuardVerdict
+
+    await core.handle_ingest(
+        IngestDocument(doc_id="d1", title="Datasheet", doc_type="datasheet", source="cli",
+                        text="The AuroraPrep kit is stable for 18 months unopened at room temperature."),
+        sender=core.config.ingest_address,
+    )
+    hits = core.retriever.search("How long is the kit stable unopened?", k=1)
+    out["retrieval_hit"] = hits[0].text if hits else None
+
+    esc_id = "hosted-smoke"
+    core.kb.add_pending(Escalation(escalation_id=esc_id, question="q", reason=EscalationReason.LOW_CONFIDENCE), flagged=False)
+    accept_result = core.kb.accept(
+        ApprovedAnswer(
+            escalation_id=esc_id, question="q", answer="18 months", topic=Topic.RND, approved_by="guard",
+            guard_verdict=GuardVerdict(request_id="r", verdict=Verdict.APPROVED, reason="ok"),
+        ),
+        sender=core.config.router_address,
+    )
+    out["kb_accept"] = {"accepted": accept_result.accepted, "reason": accept_result.reason}
+    entry = core.kb.lookup("q")
+    out["kb_lookup_answer"] = entry.answer if entry else None
+
+    print(json.dumps(out))
+
+asyncio.run(main())
+"""
+
+
+def _run(folder, extra_env=None):
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "ROUTER_", "GUARD_", "INGEST_", "APPROVER_", "VENDOR_"))}
+    env.update(extra_env or {})
+    proc = subprocess.run(
+        [sys.executable, "-I", "-c", RUNNER], cwd=folder, env=env, capture_output=True, text=True, timeout=120
+    )
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+@pytest.fixture(scope="module")
+def dist(tmp_path_factory):
+    out = tmp_path_factory.mktemp("hosted") / "dist"
+    build(out)
+    return out / "vendor"
+
+
+def test_build_writes_flat_files_only(dist):
+    paths = list(dist.iterdir())
+    assert all(p.is_file() and p.suffix == ".py" for p in paths), paths
+    for p in paths:
+        text = p.read_text()
+        assert "from vendor_agent." not in text and "import vendor_agent." not in text, p.name
+        assert text.startswith("# Generated by"), p.name
+
+
+def test_hosted_build_imports_and_runs_core_logic(dist):
+    out = _run(
+        dist,
+        {
+            "ROUTER_ADDRESS": "agent1router", "GUARD_ADDRESS": "agent1guard", "INGEST_ADDRESS": "agent1ingest",
+            "APPROVER_ALLOWLIST": "U1",
+        },
+    )
+    assert out["vendor_seed_unused"] is True
+    assert out["storage_is_agent_storage"] is True
+    assert "18 months" in out["retrieval_hit"]
+    assert out["kb_accept"] == {"accepted": True, "reason": "accepted"}
+    assert out["kb_lookup_answer"] == "18 months"
+
+
+def test_flatten_rejects_imports_it_cannot_rewrite():
+    with pytest.raises(BuildError):
+        flatten("from .messages import X\n", "x.py")
+    with pytest.raises(BuildError):
+        flatten("import vendor_agent.core\n", "x.py")
+    assert flatten("    from vendor_agent.kb import A\n", "x.py").endswith("    from vendor_agent_kb import A\n")
+
+
+def test_flatten_rejects_module_level_file():
+    with pytest.raises(BuildError, match="__file__"):
+        flatten('DOCS = Path(__file__).with_name("docs_seed")\n', "x.py")
+    flatten('def load(path=None):\n    path = path or Path(__file__).parent\n', "x.py")  # inside a function: fine
+    flatten("# hosted modules have no __file__\n", "x.py")  # comments are fine
+
+
+def test_flatten_drops_future_annotations():
+    out = flatten("from __future__ import annotations\n\nimport json\n", "x.py")
+    assert "__future__" not in out and out.endswith("\nimport json\n")

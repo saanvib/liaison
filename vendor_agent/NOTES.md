@@ -56,16 +56,29 @@ shouldn't be treated as something askers would actually ask about verbatim.
   isn't a bug in the question flow; it's a real limitation of the free fallback. A real Gemini
   (or other) embeddings key gives much better retrieval; if running fully offline, consider
   lowering `LOW_CONFIDENCE` or expect more escalations than a real embedder would produce.
-- **Hosted Agentverse limits (A11):** per Person 2's probe (`guard/NOTES.md`), hosted Agentverse
-  only supports flat top-level `.py` files — subfolders/packages fail (`No module named '...'`),
-  and files aren't found next to code (it runs from `/runners`), so `docs_seed/*.md` can't just
-  sit alongside code either. `vendor_agent/` is a real package (`vendor_agent.core`, etc.) that
-  also imports `from contracts import ...` — neither works hosted as-is. This is why `LLMClient`/
-  `GeminiEmbedder` were switched to raw HTTP already (the SDK wasn't available hosted either, same
-  probe). The remaining fix is the same one Person 2 used for the Guard: a flat build
-  (`vendor_agent/hosted/build.py`, gitignored `dist/`) that inlines the `contracts` messages,
-  flattens the module imports, and embeds `docs_seed/*.md` as Python string constants.
-- **Live ASI:One check:** not yet run — gated on building the flat hosted package above.
+- **Hosted Agentverse limits (A11) — built and verified:** per Person 2's probe (`guard/NOTES.md`),
+  hosted Agentverse only supports flat top-level `.py` files (subfolders fail with
+  `No module named '...'`) and can't find data files next to code. `python -m
+  vendor_agent.hosted.build` flattens `vendor_agent/` into `vendor_agent/hosted/dist/vendor/`
+  (gitignored; never edit, rebuild) — same pattern as `guard/hosted/build.py`: rewrites
+  `vendor_agent.X` imports to flat `vendor_agent_X` names, drops `from __future__ import
+  annotations` (Python 3.10 hosted breaks dataclasses with it, same bug Person 2 hit), and refuses
+  to build (`BuildError`) if any import or module-level `__file__` use wasn't caught.
+  `docs_seed/*.md` is **not** embedded — seed a hosted agent over the network instead:
+  `python -m vendor_agent.ingest vendor_agent/docs_seed` (no `--direct`) once its real address is
+  known. `vendor_agent/tests/test_hosted_build.py` simulates the exact hosted module-loading
+  behavior (no `__file__`, module absent from `sys.modules` while it loads) and passed under a
+  real Python 3.10.15 venv pinned to the probed hosted versions (`uagents==0.25.5`,
+  `uagents-core==0.4.9`, `pydantic==2.8.2`) — ingest, retrieval, and KB accept/lookup all ran
+  correctly through the flattened modules. `VENDOR_SEED` is unused hosted (Agentverse assigns the
+  address); the hosted entry point (`vendor_agent/hosted/entry.py`) uses `agent.storage` directly
+  instead of a seed-derived `KeyValueStore`.
+  **Still genuinely unverified:** this was only run in a local simulation, not on real Agentverse
+  infrastructure. Deploying is: `python -m vendor_agent.hosted.build`, then paste each file in
+  `dist/vendor/` into the hosted agent's editor under the same name (`agent.py` replaces the
+  generated one), set the secrets below, run, and watch for `VENDOR ready: address=...` in the log.
+- **Live ASI:One check:** not yet run — the hosted package above is ready to deploy; the actual
+  live deployment and the 3 required ASI:One scenarios haven't happened yet.
 - **`clock` and `router` constructor params on `VendorCore`:** accepted per the shared doc's
   exact signature but unused by `handle_question` itself — Step 5's agent wiring sends the chat
   reply and calls `router.send_escalation`, not `core.py` (confirmed by `handle_question`'s own

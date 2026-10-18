@@ -2,8 +2,8 @@
 
 Not importable from the repo: hosted Agentverse predefines `agent`, and the
 imports refer to the flat files `python -m guard.hosted.build` writes next to
-it. Secrets arrive as env vars: ALLOWED_SENDERS, LLM_API_KEY, LLM_WORKSPACE_ID,
-LLM_MODEL.
+it. Secrets arrive as env vars: ALLOWED_SENDERS, LLM_API_KEY, LLM_MODEL (gemini-* or
+Anthropic), LLM_WORKSPACE_ID (Anthropic only).
 """
 import os
 

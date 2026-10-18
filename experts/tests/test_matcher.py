@@ -1,5 +1,6 @@
 import io
 import json
+import re
 
 import pytest
 
@@ -29,14 +30,14 @@ def m():
 
 # Held-out questions (not the ones used while writing directory.yaml).
 NAMED = [
-    ("How can I reduce inhibitor carryover in my eluate?", "rnd-rivera"),
-    ("What's the recommended proteinase K incubation temperature?", "rnd-rivera"),
-    ("Is it ok to freeze-thaw my plasma samples before extraction?", "rnd-natarajan"),
-    ("Where do I find the expiry date and shelf life of the reagents?", "qara-hoffmann"),
-    ("We need the CE marking and IVDR status for our tender.", "qara-bell"),
-    ("How often does the analyzer need calibration and preventive maintenance?", "eng-alvarez"),
-    ("The software update removed my user accounts", "eng-chen"),
-    ("Can we negotiate payment terms on our purchase order?", "sales-lee"),
+    ("How can I reduce inhibitor carryover in my eluate?", "saanvi"),
+    ("What's the recommended proteinase K incubation temperature?", "saanvi"),
+    ("Is it ok to freeze-thaw my plasma samples before extraction?", "saanvi"),
+    ("Where do I find the expiry date and shelf life of the reagents?", "neha"),
+    ("We need the CE marking and IVDR status for our tender.", "neha"),
+    ("How often does the analyzer need calibration and preventive maintenance?", "manasvini"),
+    ("The software update removed my user accounts", "manasvini"),
+    ("Can we negotiate payment terms on our purchase order?", "neha"),
 ]
 
 # Held-out questions that must reach the right topic, by a named expert or the topic channel.
@@ -89,7 +90,7 @@ def test_fallback_infers_topic_from_keywords(m):
 
 def test_topic_filter_restricts_candidates(m):
     q = "Analyzer error code E42 keeps coming back"
-    assert m.match(q).expert.id == "eng-alvarez"
+    assert m.match(q).expert.id == "manasvini"
     r = m.match(q, topic=Topic.SALES_OPS)
     assert r.expert is None or Topic.SALES_OPS in r.expert.topics
     assert r.topic == Topic.SALES_OPS
@@ -97,7 +98,21 @@ def test_topic_filter_restricts_candidates(m):
 
 def test_topic_filter_picks_best_within_topic(m):
     r = m.match("How do I export run results to CSV?", topic=Topic.ENGINEERING)
-    assert r.expert.id == "eng-chen" and r.topic == Topic.ENGINEERING
+    assert r.expert.id == "manasvini" and r.topic == Topic.ENGINEERING
+
+
+@pytest.mark.parametrize(
+    "question, expert_id, topic",
+    [
+        ("Can we negotiate payment terms on our purchase order?", "neha", Topic.SALES_OPS),
+        ("We need the CE marking and IVDR status for our tender.", "neha", Topic.QA_RA),
+        ("Do you ship backordered spare parts with dry ice?", "manasvini", Topic.SALES_OPS),
+        ("The software update removed my user accounts", "manasvini", Topic.ENGINEERING),
+    ],
+)
+def test_multi_topic_expert_routes_to_the_question_topic(m, question, expert_id, topic):
+    r = m.match(question)
+    assert not r.fallback and r.expert.id == expert_id and r.topic == topic
 
 
 def test_threshold_is_respected():
@@ -126,23 +141,24 @@ def test_classify_topic(question, topic):
 
 
 def test_chunks_drop_labels():
-    rivera = next(e for e in DIRECTORY if e.id == "rnd-rivera")
-    cs = chunks(rivera)
-    assert cs[0] == rivera.role
+    saanvi = next(e for e in DIRECTORY if e.id == "saanvi")
+    cs = chunks(saanvi)
+    assert cs[0] == saanvi.role
     assert not any(c.lower().startswith(("project:", "meeting notes:")) for c in cs)
 
 
 # --- directory and allowlist ------------------------------------------------
 
 def test_directory_shape():
-    assert len(DIRECTORY) == 8
+    assert [e.id for e in DIRECTORY] == ["saanvi", "neha", "manasvini"]
     for topic in Topic:
-        assert sum(topic in e.topics for e in DIRECTORY) == 2, topic
+        assert any(topic in e.topics for e in DIRECTORY), topic  # every topic has someone to escalate to
     for field in ("id", "slack_user_id"):
         values = [getattr(e, field) for e in DIRECTORY]
         assert len(set(values)) == len(values), field
     for e in DIRECTORY:
-        assert e.slack_user_id.startswith("U_") and e.display_name and e.role and e.summary
+        assert re.fullmatch(r"U[A-Z0-9]{8,}", e.slack_user_id), e.slack_user_id  # a real Slack member ID
+        assert e.display_name and e.role and e.summary
 
 
 def test_duplicate_ids_are_rejected(tmp_path):
@@ -159,10 +175,10 @@ def test_duplicate_ids_are_rejected(tmp_path):
 @pytest.mark.parametrize(
     "topic, ids",
     [
-        (Topic.RND, {"U_RND_1", "U_RND_2"}),
-        (Topic.QA_RA, {"U_QARA_1", "U_QARA_2"}),
-        (Topic.ENGINEERING, {"U_ENG_1", "U_ENG_2"}),
-        (Topic.SALES_OPS, {"U_SALES_1", "U_SALES_2"}),
+        (Topic.RND, {"U0C9YESNKB7"}),
+        (Topic.QA_RA, {"U0C9YET9PM3"}),
+        (Topic.ENGINEERING, {"U0CA5L9TELR"}),
+        (Topic.SALES_OPS, {"U0C9YET9PM3", "U0CA5L9TELR"}),
     ],
 )
 def test_allowlist(topic, ids):
@@ -178,7 +194,7 @@ def test_print_allowlist_matches_directory():
 def test_public_api():
     assert set(experts.__all__) == {"Expert", "MatchResult", "match", "load_directory", "allowlist"}
     r = experts.match("How do I export run results to our LIMS?")
-    assert isinstance(r, experts.MatchResult) and r.expert.id == "eng-chen"
+    assert isinstance(r, experts.MatchResult) and r.expert.id == "manasvini"
     assert all(isinstance(e, experts.Expert) for e in experts.load_directory())
 
 

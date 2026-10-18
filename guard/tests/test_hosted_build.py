@@ -12,8 +12,26 @@ from guard.hosted.build import BuildError, build, flatten
 
 # Runs inside the dist folder. Prints one JSON object with what the handlers did.
 RUNNER = r"""
-import asyncio, importlib.util, json, logging, os, sys
+import asyncio, importlib.abc, importlib.machinery, importlib.util, json, logging, os, sys
 sys.path.insert(0, os.getcwd())
+
+# Hosted Agentverse loads sibling files without setting __file__ (seen live 2026-10-17).
+class NoFileLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    def find_spec(self, name, path, target=None):
+        if os.path.exists(name + ".py"):
+            return importlib.machinery.ModuleSpec(name, self)  # no origin, so no __file__
+    def create_module(self, spec):
+        return None
+    def exec_module(self, module):
+        # ...and the module isn't in sys.modules while its code runs (3.10 dataclasses trip on that).
+        own = sys.modules.pop(module.__name__, None)
+        try:
+            exec(compile(open(module.__name__ + ".py").read(), module.__name__ + ".py", "exec"), module.__dict__)
+        finally:
+            if own is not None:
+                sys.modules[module.__name__] = own
+
+sys.meta_path.insert(0, NoFileLoader())
 assert importlib.util.find_spec("guard") is None, "repo packages leaked onto sys.path"
 assert not os.path.exists("policy.json")
 
@@ -105,3 +123,18 @@ def test_flatten_rejects_imports_it_cannot_rewrite():
     with pytest.raises(BuildError):
         flatten("import guard.core\n", "x.py")
     assert flatten("    from guard.llm import A\n", "x.py").endswith("    from guard_llm import A\n")
+
+
+def test_flatten_rejects_module_level_file():
+    with pytest.raises(BuildError, match="__file__"):
+        flatten('POLICY_PATH = Path(__file__).with_name("policy.json")\n', "x.py")
+    # Inside a function it only runs if called, and hosted never calls it without a policy.
+    flatten('def load(path=None):\n    path = path or Path(__file__).parent\n', "x.py")
+    flatten("# hosted modules have no __file__\n", "x.py")  # comments are fine
+
+
+def test_flatten_drops_future_annotations():
+    # Python 3.10 hosted: string annotations make dataclasses look the module up in sys.modules,
+    # which hosted Agentverse doesn't fill while loading, so the Guard failed to start (2026-10-17).
+    out = flatten("from __future__ import annotations\n\nimport json\n", "x.py")
+    assert "__future__" not in out and out.endswith("\nimport json\n")

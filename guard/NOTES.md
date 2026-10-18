@@ -48,12 +48,13 @@ A throwaway probe agent on hosted Agentverse found:
 | Data files | Not found: code runs from `/runners`, not next to your files |
 | Secrets | Arrive as env vars |
 | Outbound HTTPS | Works (`api.anthropic.com` reachable) |
+| Module loading (first deploy) | No `__file__`, and a module isn't in `sys.modules` while it loads. On 3.10 that breaks dataclasses under `from __future__ import annotations`, so the build drops that import and rejects module-level `__file__` |
 
 So the hosted Guard is a flat build: `python -m guard.hosted.build` writes `guard/hosted/dist/guard/` (imports
 rewritten, `policy.json` embedded as `guard_policy.py`, entry point from `guard/hosted/entry.py` that registers on
 the predefined `agent`) and `guard/hosted/dist/smoke_client/`. `dist/` is gitignored; rebuild, never edit.
 `guard/tests/test_hosted_build.py` runs the build in a separate interpreter with only the flat files importable.
-The full suite also passes on Python 3.10 with the hosted package versions.
+The Guard suite also passes on Python 3.10.12 with the hosted package versions (`uv venv --python 3.10.12`, then the versions above), and `test_hosted_build.py` simulates the module loading above; on 3.13 the dataclass bug does not reproduce.
 
 ## Deploying to hosted Agentverse
 1. `python -m guard.hosted.build`

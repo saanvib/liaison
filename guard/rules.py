@@ -15,7 +15,9 @@ from typing import Optional
 
 from contracts import GuardCategory, GuardRequest, Topic, Verdict
 
-POLICY_PATH = Path(__file__).with_name("policy.json")
+# Resolved in load_policy, not at import: hosted Agentverse loads modules without __file__
+# and passes the embedded policy instead (guard/hosted/entry.py).
+POLICY_FILENAME = "policy.json"
 
 _FIELD_NAMES = {"question": "question", "draft_answer": "draft"}
 
@@ -119,7 +121,8 @@ RULE_CLASSES: list[type[Rule]] = [
 ]
 
 
-def load_policy(path: Path = POLICY_PATH) -> dict:
+def load_policy(path: Optional[Path] = None) -> dict:
+    path = path or Path(__file__).with_name(POLICY_FILENAME)
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 

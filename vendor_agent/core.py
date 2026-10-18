@@ -3,13 +3,23 @@
 handle_question never talks to Slack or sends an escalation itself — it only
 returns a VendorOutput. The agent wiring (Step 5) sends the chat reply and,
 when output.escalation is set, calls router.send_escalation.
+
+The flow is split at each Guard call: start() returns the first PendingCheck,
+and advance(check, verdict) returns either the next PendingCheck or the final
+VendorOutput. A PendingCheck is plain data, so the agent wiring keeps it in
+ctx.storage while the verdict is in flight: hosted Agentverse keeps nothing in
+memory from one message to the next (seen live 2026-10-18), so the handler that
+gets the verdict never saw the question. handle_question runs the same steps in
+one call, awaiting each verdict, for tests and in-process use.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Literal, Optional, Union
 
 from contracts import (
     ApprovedAnswer,
@@ -17,6 +27,7 @@ from contracts import (
     Escalation,
     EscalationReason,
     GuardRequest,
+    GuardVerdict,
     IngestDocument,
     Source,
     Verdict,
@@ -37,6 +48,46 @@ def _render_citations(text: str, citations: list[Citation]) -> str:
         f"- {c.doc_title}" + (f" ({c.location})" if c.location else "") for c in citations
     )
     return f"{text}\n\nSources:\n{lines}"
+
+
+@dataclass
+class PendingCheck:
+    """A question waiting on one Guard verdict: the screen, the egress check of a KB
+    answer (external askers only), or the draft check."""
+
+    stage: Literal["screen", "egress", "draft"]
+    request: GuardRequest
+    question: str
+    sender: str
+    asker_ref: Optional[str]
+    draft: Optional[str] = None
+    citations: list[Citation] = field(default_factory=list)
+    kb_reply: Optional[str] = None  # egress: the KB answer with its attribution note
+
+    def to_dict(self) -> dict:
+        return {
+            "stage": self.stage,
+            "request": json.loads(self.request.model_dump_json()),
+            "question": self.question,
+            "sender": self.sender,
+            "asker_ref": self.asker_ref,
+            "draft": self.draft,
+            "citations": [json.loads(c.model_dump_json()) for c in self.citations],
+            "kb_reply": self.kb_reply,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PendingCheck":
+        return cls(
+            stage=d["stage"],
+            request=GuardRequest.model_validate(d["request"]),
+            question=d["question"],
+            sender=d["sender"],
+            asker_ref=d["asker_ref"],
+            draft=d["draft"],
+            citations=[Citation.model_validate(c) for c in d["citations"]],
+            kb_reply=d["kb_reply"],
+        )
 
 
 class VendorCore:
@@ -76,25 +127,51 @@ class VendorCore:
     # -- handle_question (D4, D7, D22, D23) --
 
     async def handle_question(self, text: str, sender: str, asker_ref: Optional[str]) -> VendorOutput:
-        internal = sender == self.config.router_address
-        counter_key = self._counter_key(sender, asker_ref)
-
         # Kick off the question's embedding concurrently with the screen call;
         # it's reused for the KB lookup and retrieval below if we get that far.
         embed_task = asyncio.create_task(asyncio.to_thread(self.retriever.embedder.embed, [text]))
+        step: Union[PendingCheck, VendorOutput] = self.start(text, sender, asker_ref)
+        vector = None
+        while isinstance(step, PendingCheck):
+            verdict = await self.guard.check(step.request, timeout_s=self.config.guard_timeout_s)
+            if step.stage == "screen":
+                if verdict is None or verdict.verdict == Verdict.BLOCKED:
+                    embed_task.cancel()
+                else:
+                    [vector] = await embed_task
+            step = self.advance(step, verdict, vector=vector)
+        return step
 
+    def start(self, text: str, sender: str, asker_ref: Optional[str]) -> PendingCheck:
+        """The rules-only screen of the question, the first Guard call."""
         screen_req = GuardRequest(
             request_id=str(uuid.uuid4()), source=Source.VENDOR_AGENT, question=text, draft_answer=""
         )
-        verdict = await self.guard.check(screen_req, timeout_s=self.config.guard_timeout_s)
+        return PendingCheck(stage="screen", request=screen_req, question=text, sender=sender, asker_ref=asker_ref)
+
+    def advance(
+        self, check: PendingCheck, verdict: Optional[GuardVerdict], vector: Optional[list[float]] = None
+    ) -> Union[PendingCheck, VendorOutput]:
+        """Continue after `check`'s verdict (None = no verdict in time). `vector` is the
+        question's embedding if the caller already has it; otherwise it's computed here."""
+        if check.stage == "screen":
+            return self._after_screen(check, verdict, vector)
+        if check.stage == "egress":
+            return self._after_egress(check, verdict)
+        return self._after_draft(check, verdict)
+
+    def _after_screen(
+        self, check: PendingCheck, verdict: Optional[GuardVerdict], vector: Optional[list[float]]
+    ) -> Union[PendingCheck, VendorOutput]:
+        text, sender, asker_ref = check.question, check.sender, check.asker_ref
+        internal = sender == self.config.router_address
+        counter_key = self._counter_key(sender, asker_ref)
 
         if verdict is not None and verdict.verdict == Verdict.BLOCKED:
-            embed_task.cancel()
             self._reset_miss_count(counter_key)
             return VendorOutput(reply_text=REFUSAL_TEXT, outcome="refused", escalation=None, asker_ref=asker_ref)
 
         if verdict is None:
-            embed_task.cancel()
             count = self._increment_miss_count(counter_key)
             if count == 1:
                 return VendorOutput(reply_text=RETRY_TEXT, outcome="retry", escalation=None, asker_ref=asker_ref)
@@ -112,7 +189,8 @@ class VendorCore:
 
         # approved
         self._reset_miss_count(counter_key)
-        [vector] = await embed_task
+        if vector is None:
+            [vector] = self.retriever.embedder.embed([text])
 
         # Step 2: KB lookup
         entry = self.kb.lookup(text, vector=vector)
@@ -124,11 +202,10 @@ class VendorCore:
                 request_id=str(uuid.uuid4()), source=Source.EXPERT, question=text,
                 draft_answer=entry.answer, citations=[],
             )
-            egress_verdict = await self.guard.check(egress_req, timeout_s=self.config.guard_timeout_s)
-            if egress_verdict is not None and egress_verdict.verdict == Verdict.APPROVED:
-                return VendorOutput(reply_text=answer_with_note, outcome="answered", escalation=None, asker_ref=asker_ref)
-            topic = self.llm.classify_topic(text)
-            return VendorOutput(reply_text=team_role_reply(topic, self.config), outcome="holding", escalation=None, asker_ref=asker_ref)
+            return PendingCheck(
+                stage="egress", request=egress_req, question=text, sender=sender, asker_ref=asker_ref,
+                kb_reply=answer_with_note,
+            )
 
         # Step 3: retrieve
         hits = self.retriever.search(text, vector=vector)
@@ -148,14 +225,27 @@ class VendorCore:
             request_id=str(uuid.uuid4()), source=Source.VENDOR_AGENT, question=text,
             draft_answer=draft, citations=citations, confidence=conf,
         )
-        draft_verdict = await self.guard.check(draft_req, timeout_s=self.config.guard_timeout_s)
+        return PendingCheck(
+            stage="draft", request=draft_req, question=text, sender=sender, asker_ref=asker_ref,
+            draft=draft, citations=citations,
+        )
 
-        if draft_verdict is not None and draft_verdict.verdict == Verdict.APPROVED:
+    def _after_egress(self, check: PendingCheck, verdict: Optional[GuardVerdict]) -> VendorOutput:
+        if verdict is not None and verdict.verdict == Verdict.APPROVED:
+            return VendorOutput(reply_text=check.kb_reply, outcome="answered", escalation=None, asker_ref=check.asker_ref)
+        topic = self.llm.classify_topic(check.question)
+        return VendorOutput(reply_text=team_role_reply(topic, self.config), outcome="holding", escalation=None, asker_ref=check.asker_ref)
+
+    def _after_draft(self, check: PendingCheck, verdict: Optional[GuardVerdict]) -> VendorOutput:
+        text, draft, asker_ref = check.question, check.draft, check.asker_ref
+        internal = check.sender == self.config.router_address
+
+        if verdict is not None and verdict.verdict == Verdict.APPROVED:
             return VendorOutput(
-                reply_text=_render_citations(draft, citations), outcome="answered", escalation=None, asker_ref=asker_ref
+                reply_text=_render_citations(draft, check.citations), outcome="answered", escalation=None, asker_ref=asker_ref
             )
 
-        if draft_verdict is None:
+        if verdict is None:
             # never send the draft (D4); not flagged, since draft_answer is set (A5)
             topic = self.llm.classify_topic(text)
             escalation = Escalation(
@@ -165,11 +255,11 @@ class VendorCore:
             return self._escalated_or_holding(internal, asker_ref, escalation, topic)
 
         # needs_review or blocked
-        reason = EscalationReason.GUARD_BLOCKED if draft_verdict.verdict == Verdict.BLOCKED else EscalationReason.GUARD_NEEDS_REVIEW
-        topic = draft_verdict.reroute_topic or self.llm.classify_topic(text)
+        reason = EscalationReason.GUARD_BLOCKED if verdict.verdict == Verdict.BLOCKED else EscalationReason.GUARD_NEEDS_REVIEW
+        topic = verdict.reroute_topic or self.llm.classify_topic(text)
         escalation = Escalation(
             escalation_id=str(uuid.uuid4()), question=text, reason=reason, topic=topic,
-            draft_answer=draft, guard_verdict=draft_verdict, asker_ref=asker_ref,
+            draft_answer=draft, guard_verdict=verdict, asker_ref=asker_ref,
         ) if internal else None
         return self._escalated_or_holding(internal, asker_ref, escalation, topic)
 

@@ -1,0 +1,22 @@
+# Where expert evidence comes from (python -m experts.ingest_github). Synthetic, like directory.yaml:
+# the repos and logins below exist only in experts/fixtures/github_activity.json. For real use, list
+# real repos and map each GitHub login (or commit email, for commits with no linked account) to an
+# expert id from directory.yaml; unmapped authors are skipped.
+
+github:
+  repos:
+    - liaison-demo/analyzer-software
+    - liaison-demo/analyzer-firmware
+    - liaison-demo/assay-analysis
+    - liaison-demo/qms-docs
+  authors:
+    schen: eng-chen
+    talvarez: eng-alvarez
+    tom.alvarez@example.com: eng-alvarez
+    pnatarajan: rnd-natarajan
+    lhoffmann: qara-hoffmann
+  # Removed from commit and PR text before matching. Product names appear in most questions, so
+  # leaving them in would pull unrelated questions toward whoever commits most (see directory.yaml).
+  ignore_terms: [GX-200, GX]
+  # Most recent chunks kept per expert, so one prolific committer can't flood the index.
+  max_per_expert: 50

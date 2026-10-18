@@ -1,0 +1,92 @@
+{
+  "liaison-demo/analyzer-software": {
+    "commits": [
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/commit/a1",
+        "author": {"login": "schen"},
+        "commit": {"message": "fix(lims): Retry LIMS upload when the hospital network drops the connection\n\nBacks off 2s, 4s, 8s.", "author": {"email": "sofia.chen@example.com", "date": "2026-09-30T14:02:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/commit/a2",
+        "author": {"login": "schen"},
+        "commit": {"message": "Add HL7 result messages for the GX-200 LIMS bridge (#57)", "author": {"email": "sofia.chen@example.com", "date": "2026-09-12T09:40:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/commit/a3",
+        "author": {"login": "schen"},
+        "commit": {"message": "fix typo", "author": {"email": "sofia.chen@example.com", "date": "2026-09-11T10:00:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/commit/a4",
+        "author": {"login": "schen"},
+        "commit": {"message": "Merge pull request #58 from liaison-demo/hl7-results", "author": {"email": "sofia.chen@example.com", "date": "2026-09-12T10:00:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/commit/a5",
+        "author": {"login": "dependabot[bot]"},
+        "commit": {"message": "Bump urllib3 from 2.2.1 to 2.2.2 in the requirements file", "author": {"email": "bot@example.com", "date": "2026-09-20T00:00:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/commit/a6",
+        "author": {"login": "kim-intern"},
+        "commit": {"message": "Prototype dark mode theme for the run report viewer", "author": {"email": "kim@example.com", "date": "2026-09-18T00:00:00Z"}}
+      }
+    ],
+    "pulls": [
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/pull/57",
+        "user": {"login": "schen"},
+        "title": "Add HL7 result messages for the GX-200 LIMS bridge",
+        "body": "",
+        "created_at": "2026-09-10T08:00:00Z"
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-software/pull/61",
+        "user": {"login": "schen"},
+        "title": "Keep audit trail entries when a user account is deactivated",
+        "body": "Deactivating an operator deleted their audit trail rows, which breaks 21 CFR Part 11 review.\n\nTests and migration below.",
+        "created_at": "2026-10-02T11:00:00Z"
+      }
+    ]
+  },
+  "liaison-demo/analyzer-firmware": {
+    "commits": [
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-firmware/commit/b1",
+        "author": {"login": "talvarez"},
+        "commit": {"message": "Add door interlock check before the centrifuge spins up", "author": {"email": "tom.alvarez@example.com", "date": "2026-09-25T16:20:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/analyzer-firmware/commit/b2",
+        "author": null,
+        "commit": {"message": "Reduce heater block overshoot during warm-up after a cold start", "author": {"email": "Tom.Alvarez@example.com", "date": "2026-09-05T07:15:00Z"}}
+      }
+    ],
+    "pulls": []
+  },
+  "liaison-demo/assay-analysis": {
+    "commits": [
+      {
+        "html_url": "https://github.com/liaison-demo/assay-analysis/commit/c1",
+        "author": {"login": "pnatarajan"},
+        "commit": {"message": "Flag wells with late Ct values in the qPCR plate report", "author": {"email": "priya.natarajan@example.com", "date": "2026-08-28T13:00:00Z"}}
+      },
+      {
+        "html_url": "https://github.com/liaison-demo/assay-analysis/commit/c2",
+        "author": {"login": "pnatarajan"},
+        "commit": {"message": "Normalize RNA yield to input volume for saliva samples", "author": {"email": "priya.natarajan@example.com", "date": "2026-03-01T13:00:00Z"}}
+      }
+    ],
+    "pulls": []
+  },
+  "liaison-demo/qms-docs": {
+    "commits": [
+      {
+        "html_url": "https://github.com/liaison-demo/qms-docs/commit/d1",
+        "author": {"login": "lhoffmann"},
+        "commit": {"message": "[docs] Add template for supplier qualification audits", "author": {"email": "lena.hoffmann@example.com", "date": "2026-09-15T09:00:00Z"}}
+      }
+    ],
+    "pulls": []
+  }
+}

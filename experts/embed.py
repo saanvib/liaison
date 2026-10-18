@@ -74,11 +74,21 @@ class BagOfWordsEmbedder:
 
 
 class HttpEmbedder:
+    # Providers cap inputs per request (some Voyage models at 128); evidence can run to hundreds.
+    BATCH_SIZE = 96
+
     def __init__(self, url: str, api_key: Optional[str] = None, model: Optional[str] = None, timeout_s: float = 10.0):
         self.url, self.api_key, self.model, self.timeout_s = url, api_key, model, timeout_s
 
     def embed(self, texts: Sequence[str]) -> list[Vector]:
-        body: dict = {"input": list(texts)}
+        texts = list(texts)
+        out: list[Vector] = []
+        for i in range(0, len(texts), self.BATCH_SIZE):
+            out.extend(self._embed_batch(texts[i : i + self.BATCH_SIZE]))
+        return out
+
+    def _embed_batch(self, texts: list[str]) -> list[Vector]:
+        body: dict = {"input": texts}
         if self.model:
             body["model"] = self.model
         headers = {"Content-Type": "application/json"}

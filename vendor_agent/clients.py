@@ -135,7 +135,39 @@ class HttpEmbedder:
         return [item["embedding"] for item in data]
 
 
+class GeminiEmbedder:
+    """Embeddings via the same google-genai SDK/account as LLMClient."""
+
+    def __init__(self, api_key: str, model: Optional[str] = None, timeout_s: float = 10.0):
+        self.api_key = api_key
+        self.model = model or "gemini-embedding-001"
+        self.timeout_s = timeout_s
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                from google import genai
+            except ImportError as e:
+                raise LLMError("the 'google-genai' package is not installed") from e
+            self._client = genai.Client(
+                api_key=self.api_key, http_options={"timeout": self.timeout_s * 1000}
+            )
+        return self._client
+
+    def embed(self, texts: Sequence[str]) -> list[Vector]:
+        client = self._get_client()
+        try:
+            response = client.models.embed_content(model=self.model, contents=list(texts))
+        except Exception as e:
+            raise LLMError(f"{type(e).__name__}: {e}") from e
+        return [e.values for e in response.embeddings]
+
+
 def default_embedder(config) -> Embedder:
-    if not config.embeddings_url:
-        return OfflineEmbedder()
-    return HttpEmbedder(config.embeddings_url, config.embeddings_api_key, config.embeddings_model)
+    if config.embeddings_url:
+        return HttpEmbedder(config.embeddings_url, config.embeddings_api_key, config.embeddings_model)
+    api_key = config.embeddings_api_key or config.llm_api_key
+    if api_key:
+        return GeminiEmbedder(api_key, config.embeddings_model)
+    return OfflineEmbedder()

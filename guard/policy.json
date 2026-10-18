@@ -1,0 +1,87 @@
+{
+  "_about": "Compliance Guard policy. Patterns are Python regexes compiled case-insensitively; use (?-i:...) for a case-sensitive part. A pattern may carry a 'context' regex that must also match somewhere in the same text. 'strip' regexes are removed from the text before matching (for negated disclaimers such as 'not for diagnostic use'). 'scan' lists the GuardRequest fields a category checks. Regulatory framing (RUO vs off-label) is demo-grade and NOT verified against FDA/EMA guidance (see docs/designs/liaison.md).",
+  "screen_rules": ["patient_data"],
+  "categories": {
+    "patient_data": {
+      "verdict": "blocked",
+      "reason": "Patient data found in the {field} ({label}); it cannot be processed or shared.",
+      "scan": ["question", "draft_answer"],
+      "patterns": [
+        {"label": "date-of-birth label", "pattern": "\\b(?:dob|d\\.o\\.b\\.?|date of birth|birth ?date)\\b"},
+        {"label": "date of birth", "pattern": "\\bborn\\s+(?:on\\s+)?\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}\\b"},
+        {"label": "medical record number label", "pattern": "\\b(?:mrn|medical record (?:number|no\\.?|#))"},
+        {"label": "SSN-like number", "pattern": "\\b\\d{3}-\\d{2}-\\d{4}\\b"},
+        {"label": "phone number", "pattern": "(?:\\+?1[\\s.-]?)?\\(?\\b\\d{3}\\)?[\\s.-]\\d{3}[\\s.-]\\d{4}\\b"},
+        {"label": "patient name", "pattern": "\\bpatients?\\b[\\s:,]+(?:named\\s+|name[:\\s]+)?(?:(?-i:Mr|Mrs|Ms|Dr)\\.?\\s+)?(?-i:[A-Z][a-z]+)\\b"},
+        {"label": "email address in a clinical context", "pattern": "[\\w.+-]+@[\\w-]+\\.[\\w.-]+", "context": "\\b(?:patients?|clinical|clinic|hospital|diagnos\\w*|medical|physician)\\b"}
+      ]
+    },
+    "ruo_clinical_use": {
+      "verdict": "blocked",
+      "reason": "The {field} involves clinical or diagnostic use of a research-use-only product ({label}).",
+      "scan": ["question", "draft_answer"],
+      "strip": [
+        "\\b(?:for\\s+)?research\\s+use\\s+only\\b",
+        "\\bnot\\s+(?:intended\\s+|approved\\s+|validated\\s+|cleared\\s+|to be used\\s+)?(?:for\\s+)?(?:use\\s+)?(?:in\\s+|for\\s+)?(?:the\\s+)?(?:clinical|diagnostic|diagnosis|diagnosing|patient)\\w*(?:\\s+(?:of\\s+\\w+|use|procedures?|purposes|applications|testing|care))?"
+      ],
+      "patterns": [
+        {"label": "clinical or diagnostic use", "pattern": "\\b(?:use|used|using|run|running|validated|approved|suitable|ok(?:ay)?|safe|rely)\\b[^.?!]{0,40}\\b(?:for|in|on)\\s+(?:a\\s+)?(?:clinical|diagnostic|diagnosis|diagnosing|patients?|patient care)\\b"},
+        {"label": "diagnosing patients", "pattern": "\\b(?:diagnose|diagnosing|diagnosis of)\\b"},
+        {"label": "clinical decision-making", "pattern": "\\b(?:treatment|clinical|therapy) decisions?\\b"},
+        {"label": "patient results reporting", "pattern": "\\b(?:report|return|give)\\w*\\b[^.?!]{0,30}\\bresults?\\b[^.?!]{0,20}\\b(?:to|for)\\s+(?:the\\s+)?(?:patients?|physicians?|doctors?|clinicians?)\\b"},
+        {"label": "IVD or clinical-lab use", "pattern": "\\b(?:as an? ivd|in vitro diagnostic|clia(?:-certified)? lab|ldt|laboratory[- ]developed test)\\b"}
+      ]
+    },
+    "off_label": {
+      "verdict": "blocked",
+      "reason": "The {field} involves use outside the product's labeled or validated use ({label}).",
+      "scan": ["question", "draft_answer"],
+      "patterns": [
+        {"label": "off-label use", "pattern": "\\boff[- ]label\\b"},
+        {"label": "use outside the IFU or intended use", "pattern": "\\b(?:outside|beyond|not (?:covered|listed|described) (?:in|by))\\s+(?:the\\s+|its\\s+)?(?:ifu|label(?:ing)?|intended use|indications?(?: for use)?|instructions for use)\\b"},
+        {"label": "unvalidated sample type or use", "pattern": "\\b(?:unvalidated|non-validated|not validated|unapproved|unsupported)\\s+(?:sample|specimen|matrix|use|indication|population|species|application)s?\\b"},
+        {"label": "use despite missing clearance", "pattern": "\\b(?:even though|although|despite|even if)\\b[^.?!]{0,40}\\bnot (?:cleared|approved|validated|indicated|labeled|labelled)\\b"},
+        {"label": "substituting a non-validated sample type", "pattern": "\\b(?:saliva|urine|csf|cerebrospinal fluid|whole blood|tissue|swabs?)\\b[^.?!]{0,30}\\b(?:instead of|in place of|rather than)\\b"}
+      ]
+    },
+    "comparative_claim": {
+      "verdict": "blocked",
+      "reason": "The {field} involves a comparative claim against competitors ({label}).",
+      "scan": ["question", "draft_answer"],
+      "patterns": [
+        {"label": "better/worse than", "pattern": "\\b(?:better|worse) than\\b"},
+        {"label": "outperforming claim", "pattern": "\\b(?:outperform\\w*|superior to|inferior to|beats?|beating)\\b"},
+        {"label": "more X than claim", "pattern": "\\b(?:more|less) (?:sensitive|accurate|specific|reliable|robust|precise) than\\b"},
+        {"label": "competitor reference", "pattern": "\\b(?:competitors?|competing (?:kits?|products?|assays?)|rival)\\b"},
+        {"label": "market-leading claim", "pattern": "\\b(?:best|most accurate|most sensitive|#1|number one|market[- ]leading|industry[- ]leading)\\b[^.?!]{0,20}\\b(?:on the market|in the industry|in (?:its )?class|available|kit|assay)\\b"},
+        {"label": "head-to-head comparison", "pattern": "\\b(?:versus|vs\\.?|compared (?:to|with)|head[- ]to[- ]head)\\b[^.?!]{0,30}(?-i:\\b[A-Z][\\w-]+)"}
+      ]
+    },
+    "pricing_contract": {
+      "verdict": "blocked",
+      "reason": "The {field} involves pricing or contract terms ({label}); routed to sales operations.",
+      "reroute_topic": "sales_ops",
+      "scan": ["question", "draft_answer"],
+      "patterns": [
+        {"label": "price amount", "pattern": "(?:[$\u20ac\u00a3]\\s?\\d|\\b\\d[\\d,.]*\\s?(?:usd|eur|dollars)\\b)"},
+        {"label": "pricing", "pattern": "\\b(?:pric(?:e|es|ed|ing)|cost|costs)\\b"},
+        {"label": "discount or quote", "pattern": "\\b(?:discount\\w*|quote|quotes|quotation|rebate\\w*)\\b"},
+        {"label": "contract terms", "pattern": "\\b(?:contracts?|contractual|purchase order|sla|service level agreement|net ?\\d{2}|payment terms|volume (?:deal|commitment|agreement))\\b"},
+        {"label": "supply or delivery commitment", "pattern": "\\b(?:guarantee\\w*|commit(?:ment)?s?(?: to)?|promise\\w*|lock in)\\b[^.?!]{0,30}\\b(?:delivery|supply|lead time|price|pricing|stock|ship\\w*)\\b"}
+      ]
+    },
+    "roadmap": {
+      "verdict": "blocked",
+      "reason": "The {field} involves unreleased or future product plans ({label}).",
+      "scan": ["question", "draft_answer"],
+      "patterns": [
+        {"label": "roadmap", "pattern": "\\broad ?map\\b"},
+        {"label": "upcoming release", "pattern": "\\b(?:upcoming|future|next|planned|unreleased) (?:release|version|feature|product|launch|generation|kit)s?\\b"},
+        {"label": "planned launch", "pattern": "\\b(?:will|going to|plans? to|planning to)\\s+(?:be\\s+)?(?:release|launch|ship|introduce|add support|roll out)\\w*\\b"},
+        {"label": "availability timing", "pattern": "\\b(?:when|will)\\b[^.?!]{0,40}\\b(?:be available|be released|come out|launch|ship)\\b"},
+        {"label": "coming soon", "pattern": "\\b(?:coming soon|in development|under development|in the works|beta (?:program|version|feature))\\b"},
+        {"label": "release date", "pattern": "\\b(?:release|launch|ship)\\w*\\b[^.?!]{0,30}\\b(?:q[1-4]|20\\d\\d|next (?:year|quarter|month))\\b"}
+      ]
+    }
+  }
+}

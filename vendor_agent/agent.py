@@ -156,6 +156,12 @@ def wire(agent: Agent, config: Config, core: Optional[VendorCore] = None, storag
         )
 
     chat_proto = Protocol(spec=chat_protocol_spec)
+    answering: set[asyncio.Task] = set()  # keeps background answers referenced until they finish
+
+    def _answer_done(task: asyncio.Task) -> None:
+        answering.discard(task)
+        if not task.cancelled() and task.exception():
+            log.error("answering a chat message failed", exc_info=task.exception())
 
     @chat_proto.on_message(ChatMessage)
     async def on_chat(ctx: Context, sender: str, msg: ChatMessage):
@@ -163,7 +169,15 @@ def wire(agent: Agent, config: Config, core: Optional[VendorCore] = None, storag
         await ctx.send(sender, ChatAcknowledgement(
             timestamp=datetime.now(timezone.utc), acknowledged_msg_id=msg.msg_id
         ))
-        text = msg.text()
+        # uAgents runs one message handler at a time by default. handle_question waits for a
+        # GuardVerdict that arrives as a separate message, so awaiting it here would keep
+        # on_verdict from running until the Guard wait had already timed out (every question
+        # became "retry"). Answer in a background task so this handler returns at once.
+        task = asyncio.create_task(_answer(ctx, sender, msg.text()))
+        answering.add(task)
+        task.add_done_callback(_answer_done)
+
+    async def _answer(ctx: Context, sender: str, text: str) -> None:
         internal = sender == config.router_address
 
         if internal:

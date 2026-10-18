@@ -75,11 +75,11 @@ class Retriever:
             )
         self.storage.set(_STORAGE_KEY, records)
 
-    def search(self, query: str, k: int = 4) -> list[Hit]:
+    def search(self, query: str, k: int = 4, vector: Optional[list[float]] = None) -> list[Hit]:
         records = self.storage.get(_STORAGE_KEY) or []
         if not records:
             return []
-        [query_vector] = self.embedder.embed([query])
+        query_vector = vector if vector is not None else self.embedder.embed([query])[0]
         scored = sorted(
             records, key=lambda r: cosine(query_vector, r["vector"]), reverse=True
         )[:k]

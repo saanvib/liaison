@@ -83,11 +83,11 @@ class KnowledgeBase:
 
     # -- lookup --
 
-    def lookup(self, question: str) -> Optional[KBEntry]:
+    def lookup(self, question: str, vector: Optional[list[float]] = None) -> Optional[KBEntry]:
         entries = self.storage.get(_ENTRIES_KEY) or []
         if not entries:
             return None
-        [query_vector] = self.embedder.embed([question])
+        query_vector = vector if vector is not None else self.embedder.embed([question])[0]
         best, best_score = None, -1.0
         for e in entries:
             score = cosine(query_vector, e["vector"])

@@ -104,11 +104,11 @@ If any check fails, **stop and tell the team.** A failure reopens decision D6 (h
 
 | Check | Result | Date | Notes |
 |---|---|---|---|
-| (a) Agentverse hosted package list and storage allow what the Vendor Agent and Guard need (an HTTP client, `json`, no local embedding library) | **not run yet** | | Person 2's desk check from the docs: [`guard/NOTES.md`](guard/NOTES.md) "Unverified" |
-| (b) A `ChatMessage` round trip between the local Router and a hosted agent | **not run yet** | | |
-| (c) A hosted KB write survives an agent restart | **not run yet** | | needs Person 1's hosted Vendor Agent |
+| (a) Agentverse hosted package list and storage allow what the Vendor Agent and Guard need (an HTTP client, `json`, no local embedding library) | **partial pass** | 2026-10-17 | The hosted echo agent ran with `uagents`, `uagents_core`'s Chat Protocol and `ctx.storage`, and no errors. Not yet tried on hosted: an HTTP client, the LLM SDKs, several modules or folders. Person 2's desk check: [`guard/NOTES.md`](guard/NOTES.md) "Unverified"; their flat hosted Guard build is in `guard/hosted/`. |
+| (b) A `ChatMessage` round trip between the local Router and a hosted agent | **pass** | 2026-10-17 | The local Router (mailbox agent) and the hosted echo agent ([`scripts/verify/echo_agent_hosted.py`](scripts/verify/echo_agent_hosted.py)). `/ask hello` in Slack, then the A2 envelope to the hosted agent, then the A2 reply back, then "Echo from hosted agent: hello" in the Slack thread, well within 30 s. |
+| (c) A hosted KB write survives an agent restart | **pass (storage)** | 2026-10-17 | The echo agent keeps a message counter in `ctx.storage`. After Stop then Start on Agentverse, the next message was #3, so the count continued. Re-check with the real Vendor KB once Person 1's agent is hosted. |
 
-Local check so far (2026-10-17): `python -m router.agent` starts on uAgents 0.26.1, registers on the Almanac API and publishes the Chat Protocol manifest.
+Local check (2026-10-17): `python -m router.agent` starts on uAgents 0.26.1, registers on the Almanac API and publishes the Chat Protocol manifest. The mailbox is connected via the agent's `/connect` endpoint with an Agentverse API key that has Mailbox write access (the inspector page could not reach localhost from the browser).
 
 ## Known limits
 
